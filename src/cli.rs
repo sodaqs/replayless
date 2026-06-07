@@ -26,6 +26,19 @@ pub enum Command {
     Compress(CompressArgs),
     /// Authorize Google Drive access (writes the refresh token to .env).
     Auth,
+    /// Upload compressed videos to Google Drive (resumable, resumable-safe).
+    Upload(UploadArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct UploadArgs {
+    /// List what would be uploaded without sending anything.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Only upload the first N pending files — handy for testing.
+    #[arg(long)]
+    pub limit: Option<usize>,
 }
 
 #[derive(Args, Debug)]

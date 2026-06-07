@@ -27,6 +27,13 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Scan => scan::run(&cfg)?,
         Command::Auth => drive::auth::run(Path::new(".env"))?,
+        Command::Upload(args) => {
+            let opts = drive::Options {
+                dry_run: args.dry_run,
+                limit: args.limit,
+            };
+            drive::run(&cfg, &opts)?;
+        }
         Command::Compress(args) => {
             let overrides = compress::Overrides {
                 codec: args.codec,

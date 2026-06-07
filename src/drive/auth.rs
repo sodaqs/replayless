@@ -18,7 +18,6 @@ const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 
 #[derive(Deserialize)]
 struct TokenResponse {
-    #[allow(dead_code)] // read by access_token(), which M3 (upload) will call
     access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
@@ -66,7 +65,6 @@ pub fn run(env_path: &Path) -> Result<()> {
 }
 
 /// Exchange the stored refresh token for a short-lived access token.
-#[allow(dead_code)] // called by M3 (upload)
 pub fn access_token() -> Result<String> {
     let client_id = require_env("GOOGLE_CLIENT_ID")?;
     let client_secret = require_env("GOOGLE_CLIENT_SECRET")?;
