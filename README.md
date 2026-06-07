@@ -175,52 +175,73 @@ audio        = 'copy'   # or a bitrate like '128k'
 jobs         = 2        # concurrent NVENC sessions
 # scale      = '1920x1080'   # uncomment to downscale
 
-[drive]
-root_folder  = 'NVIDIA Replays'
-# OAuth client secret downloaded from Google Cloud Console:
-credentials  = './credentials.json'
-token_cache  = './token.json'
 ```
 
-> `credentials.json`, `token.json`, and any real `config.toml` are **secrets /
-> machine-specific** and are git-ignored. Commit a `config.example.toml` instead.
+Google Drive **auth lives in `.env`**, not `config.toml` (see below):
+
+```dotenv
+# .env  (git-ignored; copy from .env.example)
+GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=xxxx
+GOOGLE_REFRESH_TOKEN=          # written automatically by `auth`
+DRIVE_ROOT_FOLDER=NVIDIA Replays
+```
+
+> A real `config.toml` and `.env` are **secrets / machine-specific** and are
+> git-ignored. Commit `config.example.toml` and `.env.example` as templates.
 
 ---
 
-## Google Drive setup (one-time)
+## Google Drive auth (via `.env`)
 
+**Why OAuth (not a service account):** the target is your *personal* Google Drive,
+and service accounts can't write to personal Drive (they have separate 0-quota
+storage). So we authenticate **as you** with OAuth 2.0 and keep the secrets in
+`.env`.
+
+**One-time Google Cloud setup:**
 1. Create a project at <https://console.cloud.google.com/>.
 2. **Enable** the *Google Drive API*.
-3. Configure the OAuth consent screen (External, test user = your Google account).
-4. Create an **OAuth client ID → Desktop app**; download it as `credentials.json`
-   into the project root.
-5. Run `video-uploader auth` — it opens a browser, you grant access, and the
-   refresh token is cached to `token.json`.
+3. Configure the OAuth consent screen (External; add your Google account as a test
+   user).
+4. Create an **OAuth client ID → Desktop app**. Copy its **client ID + secret**
+   into `.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
 
-**Scope:** request only `https://www.googleapis.com/auth/drive.file` (the app can
-only see/manage files it creates — least privilege).
+**Get a refresh token:** run `video-uploader auth`. It starts a localhost loopback
+server, opens your browser for consent (scope `drive.file`, `access_type=offline`,
+PKCE), catches the redirect, exchanges the code, and **writes `GOOGLE_REFRESH_TOKEN`
+back into `.env`** automatically. (Loopback — not the deprecated copy-paste/OOB
+flow.)
+
+**Scope:** only `https://www.googleapis.com/auth/drive.file` — the app can see and
+manage **only files it creates** (least privilege; it never touches the rest of
+your Drive).
 
 ---
 
 ## Proposed crates
 
-| Concern | Crate |
-|---|---|
-| CLI parsing | `clap` (derive) |
-| Recursive scan | `walkdir` |
-| Config / manifest | `serde`, `serde_json`, `toml` |
-| Errors | `anyhow` (app), `thiserror` (lib) |
-| Logging | `tracing`, `tracing-subscriber` |
-| Progress bars | `indicatif` |
-| Async runtime | `tokio` |
-| HTTP (Drive REST) | `reqwest` (resumable uploads) |
-| OAuth2 | `yup-oauth2` |
+| Concern | Crate | Status |
+|---|---|---|
+| CLI parsing | `clap` (derive) | in use |
+| Recursive scan | `walkdir` | in use |
+| Config / manifest | `serde`, `serde_json`, `toml` | in use |
+| Errors | `anyhow` | in use |
+| Logging | `tracing`, `tracing-subscriber` | in use |
+| Progress bars | `indicatif` | in use |
+| `.env` loading | `dotenvy` | M2 |
+| HTTP (Drive REST) | `reqwest` (**blocking**, rustls) | M2/M3 |
+| Loopback consent | `tiny_http` + `webbrowser` | M2 |
+| PKCE | `sha2` + `base64` | M2 |
 
-> Drive option B: the higher-level `google-drive3` crate wraps the whole API but
-> is heavier. Starting with `reqwest` + `yup-oauth2` keeps control over the
-> resumable-upload protocol, which matters most for the large files here.
+> **Synchronous by choice:** uploads run sequentially with blocking `reqwest`
+> (one file at a time — simplest, gentle on Drive's rate limits, no tokio). This
+> matches the thread-based compress stage. We hand-roll the OAuth refresh + the
+> resumable-upload protocol rather than pulling in the heavier `google-drive3` /
+> `yup-oauth2`, which keeps full control over chunking and retries for the large
+> files here.
 
-ffmpeg is invoked as a subprocess (`tokio::process::Command`); we do **not** link
+ffmpeg is invoked as a subprocess (`std::process::Command`); we do **not** link
 libav.
 
 ---
@@ -229,17 +250,18 @@ libav.
 
 ```
 src/
-  main.rs          # CLI entrypoint, dispatch
-  cli.rs           # clap definitions
-  config.rs        # load/validate config.toml
-  manifest.rs      # load/save/update resumable state
-  scan.rs          # walk source -> grouped work list
-  encode.rs        # build & run ffmpeg NVENC commands
+  main.rs          # CLI entrypoint, dispatch            [done]
+  cli.rs           # clap definitions                    [done]
+  config.rs        # load/validate config.toml           [done]
+  manifest.rs      # load/save/update resumable state    [done]
+  scan.rs          # walk source -> grouped work list    [done]
+  encode.rs        # build & run ffmpeg NVENC commands    [done]
+  probe.rs         # ffprobe: duration/fps/resolution     [done]
+  compress.rs      # orchestrate compress, --jobs pool    [done]
   drive/
-    mod.rs         # high-level: ensure folder, upload file, dedupe
-    auth.rs        # yup-oauth2 token acquisition/cache
-    upload.rs      # resumable upload protocol
-  pipeline.rs      # orchestrate scan -> compress -> upload, concurrency
+    mod.rs         # high-level: ensure folder, upload, dedup, mark manifest
+    auth.rs        # .env load, loopback consent, refresh-token grant
+    upload.rs      # resumable chunked upload protocol
 ```
 
 ---
@@ -254,9 +276,15 @@ src/
       *Done — verified end-to-end: 2 clips 12.2 GB → 1.4 GB (8.9×); manifest
       records status/sizes; re-run skips completed files. `--dry-run` and
       `--limit N` supported. 28 unit tests pass.*
-- [ ] **M2 — Drive auth:** `auth` command, OAuth flow, token cache.
-- [ ] **M3 — Upload:** ensure per-game folders, resumable upload of compact
-      files, dedupe by name/manifest, mark uploaded.
+- [ ] **M2 — Drive auth:** `dotenvy` + `.env`/`.env.example`, `auth` command
+      (loopback OAuth consent, PKCE, `drive.file` scope), exchange code → refresh
+      token and **auto-write it into `.env`**, plus an in-memory access-token
+      refresh used by later runs.
+- [ ] **M3 — Upload:** `upload` command — ensure `DRIVE_ROOT_FOLDER`/per-game
+      folder tree (create + cache IDs), **skip** files already present in the
+      target folder (dedup by name + manifest), **sequential** resumable chunked
+      upload with `Content-Range`/`308` handling + backoff, mark manifest
+      `uploaded` with the Drive file id.
 - [ ] **M4 — Orchestration:** `run` pipelines compress→upload, retries/backoff,
       `status` report, full resume.
 - [ ] **M5 — Polish:** `--dry-run`, optional cleanup flags, verification

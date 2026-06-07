@@ -46,8 +46,9 @@ cargo fmt
   *directly* contains `.mp4`s; this skips NVIDIA's junk folders like `Steam`).
 - `encode.rs` — build/run ffmpeg NVENC command; output mirrors game folders;
   skip if output exists & newer than source.
-- `drive/{auth,upload,mod}.rs` — `yup-oauth2` for tokens, `reqwest` resumable
-  uploads; ensure one Drive sub-folder per game.
+- `drive/{auth,upload,mod}.rs` — auth from `.env` (`dotenvy`), loopback OAuth
+  consent + refresh-token grant (hand-rolled, no `yup-oauth2`), **blocking**
+  `reqwest` resumable uploads; ensure one Drive sub-folder per game.
 - `pipeline.rs` — orchestrates compress→upload with bounded concurrency.
 - `manifest.rs` — load/save per-file state (`pending → compressed → uploaded`),
   the single source of truth for resume.
@@ -106,9 +107,11 @@ Keep the subject imperative and concise, e.g. `feat: add resumable Drive upload`
 
 ## Secrets — never commit
 
-`credentials.json`, `token.json`, and a real `config.toml` are git-ignored. They
-hold Google OAuth client secrets / tokens. Commit `config.example.toml` only.
-Drive scope is `drive.file` (least privilege — app only touches files it creates).
+`.env` and a real `config.toml` are git-ignored. `.env` holds the Google OAuth
+client id/secret + refresh token (keys: `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER`). Commit
+`.env.example` and `config.example.toml` as templates only. Drive scope is
+`drive.file` (least privilege — app only touches files it creates).
 
 ## Gotchas
 
@@ -121,10 +124,19 @@ Drive scope is `drive.file` (least privilege — app only touches files it creat
 - **VMAF on Windows:** ffmpeg's filtergraph parser chokes on the `C:` drive colon
   in `libvmaf log_path` no matter how you escape it. Write the log with a *bare
   relative filename* (no path) from the working dir, then read it back.
-- Consumer NVENC may cap concurrent sessions; keep `--jobs` low (default 2).
+- **Use `--jobs 1`.** Measured 2026-06-07: `--jobs 2` ran at 3.86× realtime vs.
+  3.9× single-stream — NVENC encode (or the CPU-decode fallback) is already
+  saturated by one stream, so extra jobs only add system load without finishing
+  faster. The config default is still `2`; pass `--jobs 1` for full runs. For
+  scale: the library is ~12.2 h of footage → ~3 h to encode at this rate.
 - AV1 saves the most but has weaker old-device/preview playback AND needs higher
   `cq` to actually compact (cq32 *grew* a lean clip in testing) — HEVC is the
   safe default.
 - Validate ffmpeg child-process exit codes; a non-zero exit must NOT mark a file
   `compressed` in the manifest.
 - PowerShell path quoting: always quote paths with spaces (game names have them).
+- **Drive auth = OAuth as the user, not a service account.** Service accounts
+  can't write to a personal Drive (separate 0-quota storage), so we use the OAuth
+  user flow. Use the **loopback** redirect (`127.0.0.1`), not the copy-paste/OOB
+  flow — Google deprecated OOB in 2022. `auth` writes `GOOGLE_REFRESH_TOKEN` back
+  into `.env`; uploads are sequential and skip files already in the target folder.
