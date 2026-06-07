@@ -1,0 +1,20 @@
+# Copy to config.toml and adjust. config.toml is git-ignored (machine-specific).
+# Every field is optional; omitted values fall back to the defaults shown here.
+
+source_dir = 'C:\Users\fruit\Videos\NVIDIA'
+output_dir = 'C:\Users\fruit\Videos\NVIDIA_compact'
+manifest   = 'manifest.json'
+
+[encode]
+codec   = 'hevc'   # 'hevc' (default) or 'av1' (needs higher cq to compact)
+cq      = 30       # quality: lower = better/bigger. Measured: cq30 = VMAF 94.6, 8.4x on a fat clip
+maxrate = '12M'    # bitrate ceiling so fat clips don't stay huge
+fps_cap = 30       # cap frame rate; sources >30 fps (e.g. 60) are halved to this. 0 = no cap
+audio   = 'copy'   # 'copy' or a bitrate like '128k'
+jobs    = 2        # concurrent NVENC sessions
+# scale = '1920x1080'   # uncomment to downscale 1440p -> 1080p
+
+[drive]
+root_folder = 'NVIDIA Replays'
+credentials = 'credentials.json'   # OAuth client secret from Google Cloud Console
+token_cache = 'token.json'

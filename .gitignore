@@ -1,0 +1,17 @@
+/target
+
+# Secrets — Google OAuth client + cached tokens
+credentials.json
+token.json
+
+# Local, machine-specific config (commit config.example.toml instead)
+config.toml
+
+# Resumable pipeline state
+manifest.json
+
+# Transcoded output
+/NVIDIA_compact/
+
+# Quality-check / test artifacts (VMAF logs written with bare relative names)
+vmaf_*.json
