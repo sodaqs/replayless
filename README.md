@@ -276,10 +276,12 @@ src/
       *Done — verified end-to-end: 2 clips 12.2 GB → 1.4 GB (8.9×); manifest
       records status/sizes; re-run skips completed files. `--dry-run` and
       `--limit N` supported. 28 unit tests pass.*
-- [ ] **M2 — Drive auth:** `dotenvy` + `.env`/`.env.example`, `auth` command
+- [x] **M2 — Drive auth:** `dotenvy` + `.env`/`.env.example`, `auth` command
       (loopback OAuth consent, PKCE, `drive.file` scope), exchange code → refresh
       token and **auto-write it into `.env`**, plus an in-memory access-token
-      refresh used by later runs.
+      refresh used by later runs. *Code complete; 35 unit tests (incl. RFC 7636
+      PKCE vector), clippy clean. Live browser consent pending your Google Cloud
+      OAuth client in `.env`.*
 - [ ] **M3 — Upload:** `upload` command — ensure `DRIVE_ROOT_FOLDER`/per-game
       folder tree (create + cache IDs), **skip** files already present in the
       target folder (dedup by name + manifest), **sequential** resumable chunked
