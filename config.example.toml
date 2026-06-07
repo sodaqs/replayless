@@ -14,7 +14,6 @@ audio   = 'copy'   # 'copy' or a bitrate like '128k'
 jobs    = 2        # concurrent NVENC sessions
 # scale = '1920x1080'   # uncomment to downscale 1440p -> 1080p
 
-[drive]
-root_folder = 'NVIDIA Replays'
-credentials = 'credentials.json'   # OAuth client secret from Google Cloud Console
-token_cache = 'token.json'
+# Google Drive auth + destination live in .env (see .env.example), NOT here —
+# they're secrets. Keys: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+# GOOGLE_REFRESH_TOKEN (set by `auth`), DRIVE_ROOT_FOLDER.

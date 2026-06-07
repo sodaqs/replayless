@@ -1,8 +1,7 @@
 /target
 
-# Secrets — Google OAuth client + cached tokens
-credentials.json
-token.json
+# Secrets — Google OAuth client id/secret + refresh token (commit .env.example)
+.env
 
 # Local, machine-specific config (commit config.example.toml instead)
 config.toml
