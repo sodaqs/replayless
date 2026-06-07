@@ -1,10 +1,13 @@
 mod cli;
 mod compress;
 mod config;
+mod drive;
 mod encode;
 mod manifest;
 mod probe;
 mod scan;
+
+use std::path::Path;
 
 use anyhow::Result;
 use clap::Parser;
@@ -16,10 +19,14 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
+    // Load .env into the process environment (Drive auth lives there).
+    let _ = dotenvy::dotenv();
+
     let cfg = Config::load(cli.config.as_deref())?;
 
     match cli.command {
         Command::Scan => scan::run(&cfg)?,
+        Command::Auth => drive::auth::run(Path::new(".env"))?,
         Command::Compress(args) => {
             let overrides = compress::Overrides {
                 codec: args.codec,

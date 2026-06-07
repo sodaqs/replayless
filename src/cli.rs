@@ -24,6 +24,8 @@ pub enum Command {
     Scan,
     /// Transcode pending videos into the output dir (resumable).
     Compress(CompressArgs),
+    /// Authorize Google Drive access (writes the refresh token to .env).
+    Auth,
 }
 
 #[derive(Args, Debug)]
