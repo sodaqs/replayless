@@ -282,11 +282,13 @@ src/
       refresh used by later runs. *Code complete; 35 unit tests (incl. RFC 7636
       PKCE vector), clippy clean. Live browser consent pending your Google Cloud
       OAuth client in `.env`.*
-- [ ] **M3 — Upload:** `upload` command — ensure `DRIVE_ROOT_FOLDER`/per-game
+- [x] **M3 — Upload:** `upload` command — ensure `DRIVE_ROOT_FOLDER`/per-game
       folder tree (create + cache IDs), **skip** files already present in the
       target folder (dedup by name + manifest), **sequential** resumable chunked
-      upload with `Content-Range`/`308` handling + backoff, mark manifest
-      `uploaded` with the Drive file id.
+      upload (16 MiB, `Content-Range`/`308` + retry/backoff), mark manifest
+      `uploaded` with the Drive file id. *Code complete; 44 unit tests, clippy
+      clean; `--dry-run` verified against the manifest. Live upload pending a
+      first real run.*
 - [ ] **M4 — Orchestration:** `run` pipelines compress→upload, retries/backoff,
       `status` report, full resume.
 - [ ] **M5 — Polish:** `--dry-run`, optional cleanup flags, verification
