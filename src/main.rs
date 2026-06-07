@@ -1,5 +1,9 @@
 mod cli;
+mod compress;
 mod config;
+mod encode;
+mod manifest;
+mod probe;
 mod scan;
 
 use anyhow::Result;
@@ -16,6 +20,19 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Scan => scan::run(&cfg)?,
+        Command::Compress(args) => {
+            let overrides = compress::Overrides {
+                codec: args.codec,
+                cq: args.cq,
+                maxrate: args.maxrate,
+                fps_cap: args.fps_cap,
+                scale: args.scale,
+                jobs: args.jobs,
+                dry_run: args.dry_run,
+                limit: args.limit,
+            };
+            compress::run(&cfg, &overrides)?;
+        }
     }
     Ok(())
 }

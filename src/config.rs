@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 /// Top-level configuration, loaded from `config.toml` (all fields optional).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub source_dir: PathBuf,
@@ -13,7 +13,7 @@ pub struct Config {
     pub encode: EncodeConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct EncodeConfig {
     pub codec: String,

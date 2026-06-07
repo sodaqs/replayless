@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use walkdir::WalkDir;
@@ -9,14 +9,22 @@ use crate::config::Config;
 /// Extensions we treat as videos to compress.
 const VIDEO_EXTS: &[&str] = &["mp4", "mkv", "mov", "avi"];
 
+/// One source video discovered under the library root.
+#[derive(Debug, Clone)]
+pub struct Video {
+    pub game: String,
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
 #[derive(Default, Clone, Copy)]
 struct GameStats {
     files: u64,
     bytes: u64,
 }
 
-/// Walk the source directory, group videos by game folder, and print a table.
-pub fn run(cfg: &Config) -> Result<()> {
+/// Recursively collect all source videos, tagged with their game folder.
+pub fn collect_videos(cfg: &Config) -> Result<Vec<Video>> {
     let root = &cfg.source_dir;
     if !root.is_dir() {
         bail!(
@@ -25,21 +33,32 @@ pub fn run(cfg: &Config) -> Result<()> {
         );
     }
 
-    let mut games: HashMap<String, GameStats> = HashMap::new();
-    let mut total = GameStats::default();
-
+    let mut videos = Vec::new();
     for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
         if !entry.file_type().is_file() || !is_video(entry.path()) {
             continue;
         }
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        let game = game_of(root, entry.path());
+        videos.push(Video {
+            game: game_of(root, entry.path()),
+            path: entry.path().to_path_buf(),
+            bytes: entry.metadata().map(|m| m.len()).unwrap_or(0),
+        });
+    }
+    Ok(videos)
+}
 
-        let stats = games.entry(game).or_default();
+/// Walk the source directory, group videos by game folder, and print a table.
+pub fn run(cfg: &Config) -> Result<()> {
+    let videos = collect_videos(cfg)?;
+
+    let mut games: HashMap<String, GameStats> = HashMap::new();
+    let mut total = GameStats::default();
+    for v in &videos {
+        let stats = games.entry(v.game.clone()).or_default();
         stats.files += 1;
-        stats.bytes += size;
+        stats.bytes += v.bytes;
         total.files += 1;
-        total.bytes += size;
+        total.bytes += v.bytes;
     }
 
     let mut rows: Vec<(String, GameStats)> = games.into_iter().collect();
@@ -88,7 +107,7 @@ fn is_video(path: &Path) -> bool {
 }
 
 /// Human-readable byte size, e.g. `1.5 GB`.
-fn human_size(bytes: u64) -> String {
+pub fn human_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     let mut size = bytes as f64;
     let mut unit = 0;

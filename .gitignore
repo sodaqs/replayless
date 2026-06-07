@@ -15,3 +15,7 @@ manifest.json
 
 # Quality-check / test artifacts (VMAF logs written with bare relative names)
 vmaf_*.json
+
+# Claude Code local runtime state (keep shared .claude/settings.json if added)
+.claude/scheduled_tasks.lock
+.claude/settings.local.json

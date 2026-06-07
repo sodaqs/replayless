@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 /// Compress NVIDIA replay videos with NVENC and upload them to Google Drive.
 #[derive(Parser, Debug)]
@@ -22,4 +22,41 @@ pub struct Cli {
 pub enum Command {
     /// List source videos grouped by game and print totals (read-only).
     Scan,
+    /// Transcode pending videos into the output dir (resumable).
+    Compress(CompressArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct CompressArgs {
+    /// Codec override: hevc (default) or av1.
+    #[arg(long)]
+    pub codec: Option<String>,
+
+    /// Quality override (lower = better/bigger; sane 28-34).
+    #[arg(long)]
+    pub cq: Option<u32>,
+
+    /// Bitrate ceiling override, e.g. 12M.
+    #[arg(long)]
+    pub maxrate: Option<String>,
+
+    /// Frame-rate cap override (>this is downsampled; 0 = off).
+    #[arg(long)]
+    pub fps_cap: Option<u32>,
+
+    /// Downscale, e.g. 1920x1080.
+    #[arg(long)]
+    pub scale: Option<String>,
+
+    /// Concurrent NVENC sessions.
+    #[arg(long)]
+    pub jobs: Option<usize>,
+
+    /// Print the planned ffmpeg commands without encoding.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Only process the first N (largest) pending videos — handy for testing.
+    #[arg(long)]
+    pub limit: Option<usize>,
 }
