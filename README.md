@@ -249,8 +249,11 @@ src/
 - [x] **M0 — Scaffold:** CLI skeleton (`clap`), config loading, logging, `scan`
       prints the work list and totals. *Done — `scan` reports 213 files / 187.6 GB
       across 29 game folders; 8 unit tests pass.*
-- [ ] **M1 — Compress:** ffmpeg NVENC wrapper, output dir mirroring game folders,
+- [x] **M1 — Compress:** ffmpeg NVENC wrapper, output dir mirroring game folders,
       skip-if-exists, progress bars, `--jobs` concurrency, manifest writes.
+      *Done — verified end-to-end: 2 clips 12.2 GB → 1.4 GB (8.9×); manifest
+      records status/sizes; re-run skips completed files. `--dry-run` and
+      `--limit N` supported. 28 unit tests pass.*
 - [ ] **M2 — Drive auth:** `auth` command, OAuth flow, token cache.
 - [ ] **M3 — Upload:** ensure per-game folders, resumable upload of compact
       files, dedupe by name/manifest, mark uploaded.

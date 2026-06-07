@@ -9,7 +9,9 @@ uploads them to Google Drive**, preserving the per-game folder structure.
 Source: `C:\Users\fruit\Videos\NVIDIA\<Game>\*.mp4` — ~213 files, ~188 GB,
 2560×1440 @ 30 fps H.264 ~60 Mbps. Goal: shrink ~6–8× (to ~20–30 GB), then upload.
 
-Status: **planning / scaffolding** — `src/main.rs` is still the default stub.
+Status: **M0 + M1 done** — `scan` (read-only inventory) and `compress` (NVENC
+transcode with resumable manifest, `--jobs`, `--dry-run`, `--limit`) both work.
+Next: M2 (Google Drive auth). 4 clips already compressed; 209 pending.
 
 ## Environment (this machine)
 
