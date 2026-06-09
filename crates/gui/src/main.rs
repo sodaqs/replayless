@@ -1,17 +1,27 @@
 //! video-uploader desktop GUI (gpui + gpui-component).
 //!
-//! M7: main window with source/output folder pickers (native OS dialog) and an
-//! ffmpeg readiness banner. The compress/upload run UI follows in M8/M9.
+//! M7: native folder pickers + ffmpeg banner.
+//! M8: mode selector, Start/Cancel, and live progress driven by a background
+//! worker thread that streams `vu_core::progress::Event`s into the view.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use futures::StreamExt;
 use gpui::{
     App, AppContext, Application, Bounds, Context, Entity, Hsla, IntoElement, ParentElement,
     PathPromptOptions, Render, SharedString, Styled, Window, WindowBounds, WindowOptions, div, px,
-    size,
+    relative, size,
 };
-use gpui_component::{ActiveTheme, Icon, IconName, Root, Sizable, button::Button, h_flex, v_flex};
-use vu_core::config::Config;
+use gpui_component::{
+    ActiveTheme, Disableable, Icon, IconName, Root, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex, v_flex,
+};
+use vu_core::compress::{self, Overrides};
+use vu_core::config::{Config, EncodeConfig};
+use vu_core::progress::{CancelToken, Event, ProgressSink, Stage};
+use vu_core::scan::human_size;
 use vu_core::tooling::{self, ToolStatus};
 
 /// Which folder a picker session is choosing.
@@ -21,11 +31,159 @@ enum Target {
     Output,
 }
 
+/// What a run should do.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Compress,
+    Upload,
+    Both,
+}
+
+impl Mode {
+    fn does_compress(self) -> bool {
+        matches!(self, Mode::Compress | Mode::Both)
+    }
+    fn does_upload(self) -> bool {
+        matches!(self, Mode::Upload | Mode::Both)
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Mode::Compress => "Compress",
+            Mode::Upload => "Upload",
+            Mode::Both => "Compress + Upload",
+        }
+    }
+    fn id(self) -> &'static str {
+        match self {
+            Mode::Compress => "mode-compress",
+            Mode::Upload => "mode-upload",
+            Mode::Both => "mode-both",
+        }
+    }
+}
+
+/// Live state of an in-flight (or finished) run, updated from worker events.
+struct RunState {
+    cancel: CancelToken,
+    stage: Stage,
+    files_total: usize,
+    bytes_total: u64,
+    files_done: usize,
+    failed: usize,
+    skipped: usize,
+    current_file: Option<String>,
+    current_fraction: f32,
+    current_speed: Option<f32>,
+    current_eta: Option<u64>,
+    finished: bool,
+    log: VecDeque<String>,
+}
+
+impl RunState {
+    fn new(cancel: CancelToken) -> Self {
+        Self {
+            cancel,
+            stage: Stage::Compress,
+            files_total: 0,
+            bytes_total: 0,
+            files_done: 0,
+            failed: 0,
+            skipped: 0,
+            current_file: None,
+            current_fraction: 0.0,
+            current_speed: None,
+            current_eta: None,
+            finished: false,
+            log: VecDeque::new(),
+        }
+    }
+
+    fn push_log(&mut self, line: String) {
+        self.log.push_back(line);
+        while self.log.len() > 8 {
+            self.log.pop_front();
+        }
+    }
+
+    fn apply(&mut self, ev: Event) {
+        match ev {
+            Event::StageStarted {
+                stage,
+                files,
+                total_bytes,
+            } => {
+                self.stage = stage;
+                self.files_total = files;
+                self.bytes_total = total_bytes;
+                self.files_done = 0;
+                self.current_file = None;
+            }
+            Event::FileStarted { key, .. } => {
+                self.current_file = Some(key);
+                self.current_fraction = 0.0;
+                self.current_speed = None;
+                self.current_eta = None;
+            }
+            Event::FileProgress {
+                fraction,
+                speed,
+                eta_secs,
+                ..
+            } => {
+                self.current_fraction = fraction;
+                self.current_speed = speed;
+                self.current_eta = eta_secs;
+            }
+            Event::FileFinished { .. } => {
+                self.files_done += 1;
+                self.current_file = None;
+                self.current_fraction = 0.0;
+            }
+            Event::FileSkipped { .. } => {
+                self.files_done += 1;
+                self.skipped += 1;
+            }
+            Event::FileFailed { key, error, .. } => {
+                self.files_done += 1;
+                self.failed += 1;
+                self.current_file = None;
+                self.current_fraction = 0.0;
+                self.push_log(format!("✗ {}: {error}", basename(&key)));
+            }
+            Event::StageFinished {
+                stage,
+                ok,
+                skipped,
+                failed,
+                in_bytes,
+                out_bytes,
+            } => {
+                let summary = match stage {
+                    Stage::Compress => format!(
+                        "Compress: {ok} done, {failed} failed, {skipped} skipped — {} → {} ({})",
+                        human_size(in_bytes),
+                        human_size(out_bytes),
+                        compress::ratio(in_bytes, out_bytes)
+                    ),
+                    Stage::Upload => format!(
+                        "Upload: {ok} uploaded, {skipped} skipped, {failed} failed — {} sent",
+                        human_size(in_bytes)
+                    ),
+                };
+                self.push_log(summary);
+            }
+            Event::Log { message } => self.push_log(message),
+        }
+    }
+}
+
 /// Root application view + state.
 struct AppView {
     input_dir: Option<PathBuf>,
     output_dir: Option<PathBuf>,
     ffmpeg: ToolStatus,
+    mode: Mode,
+    run: Option<RunState>,
 }
 
 impl AppView {
@@ -35,6 +193,8 @@ impl AppView {
             input_dir: Some(cfg.source_dir),
             output_dir: Some(cfg.output_dir),
             ffmpeg: tooling::ffmpeg_status(),
+            mode: Mode::Compress,
+            run: None,
         }
     }
 
@@ -50,6 +210,116 @@ impl AppView {
         cx.notify();
     }
 
+    fn running(&self) -> bool {
+        self.run.as_ref().is_some_and(|r| !r.finished)
+    }
+
+    /// Whether Start can be pressed in the current state.
+    fn can_start(&self) -> bool {
+        if self.running() || self.output_dir.is_none() {
+            return false;
+        }
+        if self.mode.does_compress() {
+            self.input_dir.is_some() && self.ffmpeg == ToolStatus::Ready
+        } else {
+            true
+        }
+    }
+}
+
+impl Render for AppView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity();
+        let theme = cx.theme();
+        let (bg, fg, muted, accent, success, danger) = (
+            theme.background,
+            theme.foreground,
+            theme.muted_foreground,
+            theme.primary,
+            theme.success,
+            theme.danger,
+        );
+
+        // ffmpeg banner
+        let (icon, color, text) = match self.ffmpeg {
+            ToolStatus::Ready => (IconName::CircleCheck, success, "ffmpeg ready".to_string()),
+            ToolStatus::Missing => (
+                IconName::CircleX,
+                danger,
+                "ffmpeg not found — install with: winget install Gyan.FFmpeg".to_string(),
+            ),
+        };
+        let v_re = view.clone();
+        let banner =
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(Icon::new(icon).text_color(color))
+                .child(div().text_color(color).child(SharedString::from(text)))
+                .child(Button::new("recheck").label("Re-check").small().on_click(
+                    move |_ev, _w, cx| v_re.update(cx, |this, cx| this.recheck_ffmpeg(cx)),
+                ));
+
+        // Mode selector
+        let mode_row = h_flex()
+            .gap_1()
+            .items_center()
+            .child(div().w(px(110.)).child("Mode"))
+            .child(mode_button(&view, Mode::Compress, self.mode))
+            .child(mode_button(&view, Mode::Upload, self.mode))
+            .child(mode_button(&view, Mode::Both, self.mode));
+
+        // Start / Cancel
+        let v_start = view.clone();
+        let start = Button::new("start")
+            .label("Start")
+            .primary()
+            .disabled(!self.can_start())
+            .on_click(move |_ev, _w, cx| start_run(&v_start, cx));
+        let cancel = self.running().then(|| {
+            let v = view.clone();
+            Button::new("cancel")
+                .label("Cancel")
+                .on_click(move |_ev, _w, cx| {
+                    v.update(cx, |this, c| {
+                        if let Some(r) = &this.run {
+                            r.cancel.cancel();
+                        }
+                        c.notify();
+                    })
+                })
+        });
+        let actions = h_flex().gap_2().child(start).children(cancel);
+
+        div().size_full().bg(bg).text_color(fg).p_4().child(
+            v_flex()
+                .gap_4()
+                .child(div().text_xl().child("video-uploader"))
+                .child(banner)
+                .child(self.folder_row(
+                    &view,
+                    "Source folder",
+                    self.input_dir.as_ref(),
+                    Target::Input,
+                    "browse-in",
+                    muted,
+                ))
+                .child(self.folder_row(
+                    &view,
+                    "Output folder",
+                    self.output_dir.as_ref(),
+                    Target::Output,
+                    "browse-out",
+                    muted,
+                ))
+                .child(mode_row)
+                .child(actions)
+                .children(self.run.as_ref().map(|r| run_panel(r, muted, accent, fg))),
+        )
+    }
+}
+
+impl AppView {
     fn folder_row(
         &self,
         view: &Entity<Self>,
@@ -82,60 +352,89 @@ impl AppView {
     }
 }
 
-impl Render for AppView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let view = cx.entity();
-        let theme = cx.theme();
-        let (bg, fg, muted, success, danger) = (
-            theme.background,
-            theme.foreground,
-            theme.muted_foreground,
-            theme.success,
-            theme.danger,
-        );
-
-        let (icon, color, text) = match self.ffmpeg {
-            ToolStatus::Ready => (IconName::CircleCheck, success, "ffmpeg ready".to_string()),
-            ToolStatus::Missing => (
-                IconName::CircleX,
-                danger,
-                "ffmpeg not found — install with: winget install Gyan.FFmpeg".to_string(),
-            ),
-        };
-        let v_re = view.clone();
-        let banner =
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(Icon::new(icon).text_color(color))
-                .child(div().text_color(color).child(SharedString::from(text)))
-                .child(Button::new("recheck").label("Re-check").small().on_click(
-                    move |_ev, _w, cx| v_re.update(cx, |this, cx| this.recheck_ffmpeg(cx)),
-                ));
-
-        div().size_full().bg(bg).text_color(fg).p_4().child(
-            v_flex()
-                .gap_4()
-                .child(div().text_xl().child("video-uploader"))
-                .child(banner)
-                .child(self.folder_row(
-                    &view,
-                    "Source folder",
-                    self.input_dir.as_ref(),
-                    Target::Input,
-                    "browse-in",
-                    muted,
-                ))
-                .child(self.folder_row(
-                    &view,
-                    "Output folder",
-                    self.output_dir.as_ref(),
-                    Target::Output,
-                    "browse-out",
-                    muted,
-                )),
-        )
+/// A mode-selector button, highlighted when it's the active mode.
+fn mode_button(view: &Entity<AppView>, mode: Mode, current: Mode) -> Button {
+    let v = view.clone();
+    let button = Button::new(mode.id())
+        .label(mode.label())
+        .small()
+        .on_click(move |_ev, _w, cx| {
+            v.update(cx, |this, c| {
+                this.mode = mode;
+                c.notify();
+            })
+        });
+    if mode == current {
+        button.primary()
+    } else {
+        button
     }
+}
+
+/// The live-progress panel shown while/after a run.
+fn run_panel(r: &RunState, muted: Hsla, accent: Hsla, fg: Hsla) -> impl IntoElement {
+    // Smoothly include the in-flight file's progress, not just completed files.
+    let in_flight = if r.current_file.is_some() {
+        r.current_fraction
+    } else {
+        0.0
+    };
+    let overall = if r.files_total > 0 {
+        (r.files_done as f32 + in_flight) / r.files_total as f32
+    } else if r.finished {
+        1.0
+    } else {
+        0.0
+    };
+    let header = if r.finished {
+        format!("Done — {}/{} files", r.files_done, r.files_total)
+    } else {
+        format!(
+            "{}: {}/{} files · {} · {} failed · {} skipped",
+            stage_label(r.stage),
+            r.files_done,
+            r.files_total,
+            human_size(r.bytes_total),
+            r.failed,
+            r.skipped
+        )
+    };
+
+    let current = r.current_file.as_ref().map(|f| {
+        let mut line = format!("{} · {:.0}%", basename(f), r.current_fraction * 100.0);
+        if let Some(s) = r.current_speed {
+            line.push_str(&format!(" · {s:.1}x"));
+        }
+        if let Some(e) = r.current_eta {
+            line.push_str(&format!(" · ETA {}", fmt_eta(e)));
+        }
+        div().text_color(muted).child(SharedString::from(line))
+    });
+
+    let log = r
+        .log
+        .iter()
+        .cloned()
+        .map(|l| div().text_color(muted).child(SharedString::from(l)));
+
+    v_flex()
+        .gap_2()
+        .pt_2()
+        .child(div().text_color(fg).child(SharedString::from(header)))
+        .child(progress_bar(overall, muted, accent))
+        .children(current)
+        .child(v_flex().gap_0p5().children(log))
+}
+
+/// A simple two-div progress bar filled to `fraction` (0..=1).
+fn progress_bar(fraction: f32, track: Hsla, fill: Hsla) -> impl IntoElement {
+    div().w_full().h(px(8.)).rounded_full().bg(track).child(
+        div()
+            .h_full()
+            .w(relative(fraction.clamp(0.0, 1.0)))
+            .rounded_full()
+            .bg(fill),
+    )
 }
 
 /// Open the native OS folder picker for `target` and write the chosen path back
@@ -149,7 +448,6 @@ fn pick_folder(view: &Entity<AppView>, target: Target, cx: &mut App) {
     });
     let view = view.clone();
     cx.spawn(async move |cx| {
-        // Ok(Ok(Some(_))) = a folder was chosen; cancelled -> None; Err -> failed.
         if let Ok(Ok(Some(picked))) = paths.await
             && let Some(path) = picked.into_iter().next()
         {
@@ -164,11 +462,132 @@ fn pick_folder(view: &Entity<AppView>, target: Target, cx: &mut App) {
     .detach();
 }
 
+/// A [`ProgressSink`] that forwards core events to the UI over a channel.
+struct ChannelSink(futures::channel::mpsc::UnboundedSender<Event>);
+
+impl ProgressSink for ChannelSink {
+    fn emit(&mut self, event: Event) {
+        let _ = self.0.unbounded_send(event);
+    }
+}
+
+/// Kick off a run: spawn the blocking pipeline on a worker thread and drain its
+/// progress events into the view on gpui's foreground executor.
+fn start_run(view: &Entity<AppView>, cx: &mut App) {
+    let (mode, input, output) = {
+        let v = view.read(cx);
+        (v.mode, v.input_dir.clone(), v.output_dir.clone())
+    };
+    let Some(output) = output else { return };
+    if mode.does_compress() && input.is_none() {
+        return;
+    }
+
+    let cancel = CancelToken::new();
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
+
+    view.update(cx, |this, c| {
+        this.run = Some(RunState::new(cancel.clone()));
+        c.notify();
+    });
+
+    // Build core inputs. Manifest lives beside the output set.
+    let manifest = output.join(".video-uploader").join("manifest.json");
+    if let Some(dir) = manifest.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let cfg = Config {
+        source_dir: input.clone().unwrap_or_else(|| output.clone()),
+        output_dir: output,
+        manifest,
+        encode: EncodeConfig::default(),
+    };
+
+    // Worker thread: blocking compress/upload, off the UI thread.
+    let worker_cancel = cancel.clone();
+    std::thread::spawn(move || {
+        let mut sink = ChannelSink(tx);
+        if mode.does_compress() && !worker_cancel.is_cancelled() {
+            let ov = Overrides {
+                jobs: Some(1),
+                ..Default::default()
+            };
+            if let Err(e) = compress::run(&cfg, &ov, &mut sink, &worker_cancel) {
+                sink.emit(Event::Log {
+                    message: format!("compress error: {e:#}"),
+                });
+            }
+        }
+        if mode.does_upload() && !worker_cancel.is_cancelled() {
+            let opts = vu_drive::Options::default();
+            if let Err(e) = vu_drive::run(&cfg, &opts, &mut sink, &worker_cancel) {
+                sink.emit(Event::Log {
+                    message: format!("upload error: {e:#}"),
+                });
+            }
+        }
+        // `tx` drops here -> the foreground drain loop ends.
+    });
+
+    // Foreground: apply events to the view as they arrive.
+    let v = view.clone();
+    cx.spawn(async move |cx| {
+        while let Some(ev) = rx.next().await {
+            if cx
+                .update(|app| {
+                    v.update(app, |this, c| {
+                        if let Some(r) = this.run.as_mut() {
+                            r.apply(ev);
+                        }
+                        c.notify();
+                    });
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+        let _ = cx.update(|app| {
+            v.update(app, |this, c| {
+                if let Some(r) = this.run.as_mut() {
+                    r.finished = true;
+                }
+                c.notify();
+            });
+        });
+    })
+    .detach();
+}
+
+fn stage_label(stage: Stage) -> &'static str {
+    match stage {
+        Stage::Compress => "Compressing",
+        Stage::Upload => "Uploading",
+    }
+}
+
+/// The last path component of a forward-slashed manifest key.
+fn basename(key: &str) -> &str {
+    key.rsplit('/').next().unwrap_or(key)
+}
+
+/// Format a remaining-seconds estimate compactly (`1h02m`, `3m05s`, `42s`).
+fn fmt_eta(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, (secs % 3600) / 60, secs % 60);
+    if h > 0 {
+        format!("{h}h{m:02}m")
+    } else if m > 0 {
+        format!("{m}m{s:02}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
 fn main() {
     Application::new().run(|cx: &mut App| {
         gpui_component::init(cx);
 
-        let bounds = Bounds::centered(None, size(px(760.0), px(520.0)), cx);
+        let bounds = Bounds::centered(None, size(px(760.0), px(560.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
