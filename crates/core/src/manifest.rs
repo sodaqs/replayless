@@ -38,8 +38,7 @@ impl Manifest {
         }
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading manifest {}", path.display()))?;
-        serde_json::from_str(&text)
-            .with_context(|| format!("parsing manifest {}", path.display()))
+        serde_json::from_str(&text).with_context(|| format!("parsing manifest {}", path.display()))
     }
 
     /// Persist atomically (write to a temp file, then rename over the target).

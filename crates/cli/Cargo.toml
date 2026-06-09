@@ -1,0 +1,17 @@
+[package]
+name = "video-uploader"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "video-uploader"
+path = "src/main.rs"
+
+[dependencies]
+vu-core = { path = "../core" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
+indicatif = "0.17"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

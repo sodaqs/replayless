@@ -246,23 +246,293 @@ libav.
 
 ---
 
-## Module layout (planned)
+## Module layout (realized — workspace as of M6)
 
 ```
-src/
-  main.rs          # CLI entrypoint, dispatch            [done]
-  cli.rs           # clap definitions                    [done]
-  config.rs        # load/validate config.toml           [done]
-  manifest.rs      # load/save/update resumable state    [done]
-  scan.rs          # walk source -> grouped work list    [done]
-  encode.rs        # build & run ffmpeg NVENC commands    [done]
-  probe.rs         # ffprobe: duration/fps/resolution     [done]
-  compress.rs      # orchestrate compress, --jobs pool    [done]
-  drive/
-    mod.rs         # high-level: ensure folder, upload, dedup, mark manifest
-    auth.rs        # .env load, loopback consent, refresh-token grant
-    upload.rs      # resumable chunked upload protocol
+Cargo.toml                 # [workspace] members = core, cli
+crates/
+  core/  (lib "vu_core")   # UI-agnostic logic — no clap, no gpui
+    src/
+      lib.rs               # pub module surface
+      config.rs            # load/validate config.toml            [done]
+      manifest.rs          # load/save/update resumable state      [done]
+      scan.rs              # walk source -> grouped work list       [done]
+      probe.rs             # ffprobe: duration/fps/resolution        [done]
+      encode.rs            # build args; spawn ffmpeg + -progress     [done]
+      compress.rs          # orchestrate compress, --jobs, temp→rename [done]
+      progress.rs          # Event / ProgressSink / CancelToken        [done]
+      drive/
+        mod.rs             # ensure folder, upload, dedup, mark manifest [done]
+        auth.rs            # .env load, loopback consent, refresh token   [done]
+        upload.rs          # resumable chunked upload (+ progress cb)      [done]
+  cli/   (bin "video-uploader")
+    src/
+      main.rs              # clap dispatch -> core                  [done]
+      cli.rs               # clap definitions                       [done]
+      ui.rs                # indicatif ProgressSink for the CLI      [done]
+  gui/   (bin, planned M7+) # gpui app -> core (channel sink)
 ```
+
+---
+
+## Desktop GUI (gpui + gpui-component) — planned
+
+A native desktop front-end for the **compress → upload** flow, built on
+[gpui](https://github.com/zed-industries/zed) (Zed's GPU-accelerated UI
+framework) and [gpui-component](https://github.com/longbridge/gpui-component)
+(60+ widgets: inputs, buttons, progress, virtualized tables, notifications,
+modals, themes). The CLI stays fully usable — the GUI is a **second front-end
+over the same core**, not a rewrite.
+
+### What it does (v1 scope)
+
+- **Choose the operation** — **Compress only**, **Upload only**, or
+  **Compress + Upload**. The rest of the UI adapts: required folders, readiness
+  checks, and the pre-flight summary all depend on the chosen mode.
+- Pick **input** (source) and/or **output** folders via the in-app folder picker
+  (input is only needed when compressing).
+- **Readiness checks** before Start: `ffmpeg`/`ffprobe` present (Compress / Both —
+  offer a `winget` install if missing); Drive auth available in `.env`
+  (Upload / Both).
+- **Pre-flight summary** before anything runs, mode-dependent: compress → file
+  count + **size now** + **estimated size after** (+ ratio); upload → count +
+  **bytes to send** to Drive.
+- **Run** the selected work with a live **overall progress bar + ETA**, a
+  per-file list, and a **Cancel** button. Upload reuses the existing resumable
+  pipeline. *(Drive auth is done once via the CLI `auth` command, which writes
+  the refresh token into `.env`; the GUI reads it.)*
+
+### Architecture: workspace with a shared core
+
+Refactor the single binary into a Cargo **workspace** so the heavy gpui
+dependency never touches the CLI build:
+
+```
+video-uploader/                # workspace root
+  Cargo.toml                   # [workspace] members = ["crates/*"]
+  crates/
+    core/                      # all logic — no UI, no clap, no gpui
+      scan.rs  probe.rs  encode.rs  compress.rs
+      manifest.rs  config.rs  tooling.rs  estimate.rs
+      progress.rs              # ProgressSink trait + Event enum + CancelToken
+      drive/{mod,auth,upload}.rs
+    cli/                       # thin clap binary -> core (indicatif sink)
+      main.rs  cli.rs
+    gui/                       # gpui app -> core (channel sink)
+      main.rs  app.rs  state.rs  views/...
+```
+
+Today's `src/*.rs` move almost verbatim into `crates/core`; `main.rs` becomes
+`crates/cli`. The only behavioral change to core is the progress/cancel refactor
+below — **which the CLI benefits from too.**
+
+### Core refactor (prerequisite — benefits CLI + GUI)
+
+Two things in the current code block a responsive GUI:
+
+1. **Progress is hard-wired to `indicatif`/`println!`.** Introduce a
+   frontend-agnostic sink in `core::progress` (kept **sync** — no async deps leak
+   into core):
+
+   ```rust
+   pub enum Event {
+       Scan      { files: usize, total_bytes: u64 },
+       Estimate  { est_output_bytes: u64, ratio: f32 },
+       FileStart { key: String, src_bytes: u64, index: usize, total: usize },
+       FileProgress { key: String, done_secs: f64, dur_secs: f64, speed: f32 },
+       FileDone   { key: String, out_bytes: u64 },
+       FileFailed { key: String, error: String },
+       UploadProgress { key: String, sent: u64, total: u64 },
+       UploadDone { key: String, drive_id: String },
+       Done { compressed: u64, failed: u64, in_bytes: u64, out_bytes: u64 },
+   }
+
+   pub trait ProgressSink: Send { fn emit(&mut self, ev: Event); }
+   ```
+
+   `compress::run` / `drive::run` take `&mut dyn ProgressSink` instead of
+   printing. CLI implements it with `indicatif`; GUI forwards events to a channel.
+
+2. **Encode is blocking and uncancellable** (`Command::output()`). Switch to
+   `Command::spawn()` to gain:
+   - **Cancellation** — thread a `CancelToken` (`Arc<AtomicBool>`) through the job
+     loop; on cancel, `child.kill()` the running ffmpeg and stop pulling jobs.
+   - **Per-file progress + ETA** — add `-progress pipe:1 -nostats` and parse the
+     `out_time_us=` / `speed=` lines ffmpeg streams, combined with the ffprobe
+     duration, to drive a real per-file bar and remaining-time estimate.
+
+   > Dovetails with the already-filed hardening task (encode to a temp path,
+   > rename on success): a killed ffmpeg must never leave a "fresh" partial that
+   > resume mistakes for done.
+
+### ffmpeg pre-flight + winget install
+
+New `core::tooling`:
+
+- `ffmpeg_status()` → checks `ffmpeg -version` and `ffprobe -version` on `PATH`,
+  plus the winget shim dir (`%LOCALAPPDATA%\Microsoft\WinGet\Links`) in case
+  `PATH` wasn't refreshed in the running process.
+- `install_ffmpeg(sink)` → runs
+  `winget install --id Gyan.FFmpeg -e --source winget --accept-package-agreements --accept-source-agreements`,
+  streaming stdout/stderr to the sink so the GUI shows live progress.
+- After install, **re-resolve** ffmpeg without an app restart (fall back to the
+  `WinGet\Links` shim path if the running process's `PATH` is stale).
+
+GUI flow: a small **banner** — ✅ "ffmpeg ready" / ⬇️ "Not found — Install with
+winget" (button) / ⏳ streaming install log / ❌ error with winget output. Start
+stays disabled until ffmpeg resolves. This banner applies to **Compress /
+Compress + Upload** only — **Upload-only** skips ffmpeg entirely and instead
+requires Drive auth in `.env` (its own banner).
+
+> **Caveats:** winget may trigger a **UAC** prompt and is absent on very old
+> Windows builds — surface a clear message + a manual-install link as fallback.
+
+### Size estimation (before / estimated after)
+
+`core::estimate`:
+
+- **Size before** is free — `scan` already has per-file sizes.
+- **Estimated size after** uses the `maxrate` cap as the dominant signal:
+  `est_video ≈ min(src_video_bitrate, maxrate) / 8 × duration`; audio adds `copy`
+  ≈ source audio. Per file `est_out = min(src_bytes, est_video + est_audio)` —
+  fat clips collapse toward the cap, lean clips stay near original (no bloat),
+  matching observed behavior.
+- **Two-phase for responsiveness:** show an instant rough total from a stored
+  average ratio (our real run was **187.6 GB → 28.9 GB ≈ 6.5×**), then refine
+  **per file as ffprobe durations stream in** on a background task.
+
+### GUI structure (gpui)
+
+**Bootstrap** (per gpui-component docs — *lock exact APIs to the pinned gpui
+revision during the M7 spike; gpui's API churns*):
+
+```rust
+let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+app.run(|cx| {
+    gpui_component::init(cx);
+    cx.open_window(WindowOptions::default(), |window, cx| {
+        let view = cx.new(|cx| AppView::new(window, cx));
+        cx.new(|cx| Root::new(view.into(), window, cx))   // Root wraps the tree
+    }).unwrap();
+});
+```
+
+**State entity** (`gui::state::AppState`, a gpui `Entity`):
+
+| Field | Purpose |
+|---|---|
+| `mode` | Compress / Upload / Both — drives gating, summary, and the worker |
+| `input_dir`, `output_dir` | chosen folders (input only needed for compress/both) |
+| `settings` | codec, cq, maxrate, fps_cap, jobs, scale (preset or advanced) |
+| `ffmpeg` | Unknown / Installing(log) / Ready / Error (compress/both) |
+| `drive` | auth status from `.env`: Ready / Missing (upload/both) |
+| `preflight` | files, bytes_before, est_bytes_after, ratio, or bytes_to_upload |
+| `phase` | Idle / Scanning / Estimating / Ready / Compressing / Uploading / Done / Error |
+| `files` | per-file status, %, size in/out (virtualized table) |
+| `overall` | done/total, bytes, ETA, speed |
+| `cancel` | `CancelToken` shared with the worker |
+| `log` | recent core/winget output |
+
+**Views** (gpui-component widgets):
+
+- Folder row — two read-only inputs + **Browse** buttons (open the in-app
+  folder-picker `Dialog`).
+- **Mode selector** — a segmented control: **Compress** / **Upload** /
+  **Compress + Upload**. Switching it shows/hides the input-folder row, the
+  ffmpeg banner, and the Drive banner, and reshapes the pre-flight card.
+- Settings — a **preset** dropdown (Balanced `cq30` / Smaller `cq32`+8M / Higher
+  `cq28`) with an **Advanced** expander for raw knobs (compress/both only).
+- **Readiness banners** — ffmpeg (compress/both, above) and **Drive auth**
+  (upload/both): ✅ "Drive connected" / ❌ "Not authorized — run `auth` in the
+  CLI" with steps.
+- **Pre-flight card** (mode-dependent) — compress: "213 files · 187.6 GB →
+  ~28.9 GB (~6.5×)"; upload: "47 files · 6.1 GB to upload".
+- **Start / Cancel** — Start gated per mode: Compress → input + output + ffmpeg;
+  Upload → output + Drive; Both → all of them.
+- **Overall progress** bar + `12 / 213 · ~1h 42m left · 3.9× realtime`.
+- **Per-file table** — virtualized list with per-file bars.
+- **Upload section** — mirrors compress (overall + per-file send progress).
+- **Log panel** + completion/error **toasts** (notifications).
+
+**Folder picker — in-app `Dialog` (gpui-component).** Folder selection happens
+in a modal built on gpui-component's `Dialog`, so it matches the app theme and
+pulls in no extra crate (gpui-component has **no native OS file dialog** — only
+in-app modals, so we render the browser ourselves):
+
+- an editable **path `Input`** — type/paste a path to jump straight there;
+- an **Up / breadcrumb** row, and at the top level on Windows a **drive
+  selector** (enumerate `C:\`, `D:\`, … by probing `A:`–`Z:`);
+- a **virtualized `List`** of sub-folders (folder icon + name; click to enter,
+  Select to choose), read via `std::fs::read_dir` (directories only, sorted);
+- **Cancel / Select** footer; the chosen `PathBuf` flows into `input_dir` /
+  `output_dir`.
+
+gpui-component's `Dialog` / `AlertDialog` is reused for confirmations (e.g.
+overwrite warnings), and `Notification` for done/error toasts.
+
+### Background / threading bridge
+
+Core stays **synchronous and thread-based** (no tokio — consistent with the
+existing "sync by choice" decision). The GUI marshals it onto gpui's executor:
+
+```rust
+// on Start:
+let (tx, rx) = smol::channel::unbounded::<Event>();
+let cancel = state.cancel.clone();
+let mode = state.mode;                          // Compress | Upload | Both
+let (cfg, ov, opts) = state.to_run_inputs();
+
+cx.background_spawn(async move {                 // blocking pipeline OFF the UI thread
+    let mut sink = ChannelSink(tx);             // impl ProgressSink
+    if mode.does_compress() && !cancel.is_cancelled() {
+        core::compress::run(&cfg, &ov, &mut sink, &cancel);
+    }
+    if mode.does_upload() && !cancel.is_cancelled() {
+        core::drive::run(&cfg, &opts, &mut sink, &cancel);
+    }
+}).detach();
+
+cx.spawn(async move |this, cx| {                // drain events ON the UI thread
+    while let Ok(ev) = rx.recv().await {
+        this.update(cx, |state, cx| { state.apply(ev); cx.notify() })?;
+    }
+    Ok(())
+}).detach();
+```
+
+Dropping a `Task` cancels it, but we use an explicit `CancelToken` so the worker
+can kill the live ffmpeg child deterministically and finish cleanup.
+
+### Persistence
+
+- **Manifest** moves next to the output set —
+  `<output_dir>\.video-uploader\manifest.json` — so each output folder is
+  self-describing and independently resumable (the CLI gains a matching default).
+- **App prefs** (last-used folders, preset) in the OS config dir via `directories`.
+
+### Added crates (gui only — CLI/core stay lean)
+
+| Concern | Crate |
+|---|---|
+| UI framework | `gpui`, `gpui_platform` (git, `zed-industries/zed`) |
+| Widgets + assets | `gpui-component`, `gpui-component-assets` (git, `longbridge`) |
+| Channel to UI | `smol` (or `futures` mpsc) |
+| Folder picker | in-app gpui-component `Dialog` + `std::fs` (no extra crate) |
+| Config dir / prefs | `directories` |
+| ETA formatting | reuse `human_size`; `humantime` for durations |
+
+> **Pin gpui + gpui-component to matching git revisions.** gpui's API changes
+> often (e.g. `Model`→`Entity`, render signatures) and gpui-component tracks a
+> specific gpui rev — pin both in the workspace `Cargo.toml` and bump together.
+
+### Risks / prove early
+
+- **gpui builds & opens a window on this RTX 5070 / Windows 11 box** — the single
+  biggest unknown; the GUI work starts with a throwaway "hello window" spike.
+- **API churn** — keep gpui-touching code thin and isolated in `gui::views`.
+- **winget UAC / absence** — always offer a manual path + clear messaging.
+- **ETA accuracy** — the first estimate is rough; it tightens once the first
+  file or two report real `speed=` from ffmpeg.
 
 ---
 
@@ -286,13 +556,38 @@ src/
       folder tree (create + cache IDs), **skip** files already present in the
       target folder (dedup by name + manifest), **sequential** resumable chunked
       upload (16 MiB, `Content-Range`/`308` + retry/backoff), mark manifest
-      `uploaded` with the Drive file id. *Code complete; 44 unit tests, clippy
-      clean; `--dry-run` verified against the manifest. Live upload pending a
-      first real run.*
+      `uploaded` with the Drive file id. *Done & live-verified: uploaded a
+      234 MB clip to Drive (folder tree created, manifest marked `uploaded` with
+      the file id), and dedup correctly excludes it on re-run. 44 unit tests,
+      clippy clean.*
 - [ ] **M4 — Orchestration:** `run` pipelines compress→upload, retries/backoff,
       `status` report, full resume.
 - [ ] **M5 — Polish:** `--dry-run`, optional cleanup flags, verification
       (size/duration sanity check), docs.
+
+### Desktop GUI
+
+- [x] **M6 — Core refactor:** *Done.* Split into a Cargo workspace
+      (`crates/core` lib + `crates/cli` bin); added
+      `progress::{Event, ProgressSink, CancelToken}`; switched encode to
+      `spawn()` with `-progress` parsing, cancellation, and **temp-file → rename**
+      (closes the interrupted-partial bug — a killed ffmpeg leaves only a
+      `*.part.mp4`, never a "fresh" final output); re-wired the CLI onto an
+      `indicatif` sink; added per-chunk upload progress. 54 tests pass; clippy +
+      fmt clean; single-file compress live-verified (9.5 MB → 2.9 MB, no leftover
+      temp).
+- [ ] **M7 — GUI spike:** workspace `crates/gui`; prove gpui + gpui-component
+      build and open a window on this machine; build the in-app folder-picker
+      `Dialog` and the ffmpeg banner (`tooling` check + winget install). De-risks
+      the unknowns before building real UI.
+- [ ] **M8 — Compress UI:** mode selector (Compress active; Upload/Both wired in
+      M9), pre-flight summary (size before / estimated after), Start/Cancel,
+      overall + per-file progress with ETA, log panel + toasts, prefs persistence
+      (last folders, mode, preset).
+- [ ] **M9 — Upload + modes + packaging:** enable **Upload-only** and
+      **Compress + Upload** modes (Drive readiness banner, mode-aware pre-flight,
+      gating, and worker dispatch) over the existing pipeline (reads `.env`);
+      failed-file summary; bundle a Windows `.exe` (icon, assets) for one-click use.
 
 ---
 

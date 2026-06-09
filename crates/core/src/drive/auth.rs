@@ -60,7 +60,10 @@ pub fn run(env_path: &Path) -> Result<()> {
     )?;
 
     upsert_env_file(env_path, "GOOGLE_REFRESH_TOKEN", &refresh)?;
-    println!("✓ Authorized. Refresh token written to {}", env_path.display());
+    println!(
+        "✓ Authorized. Refresh token written to {}",
+        env_path.display()
+    );
     Ok(())
 }
 
@@ -139,9 +142,12 @@ fn wait_for_code(server: &tiny_http::Server) -> Result<(String, String)> {
 }
 
 fn html(message: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    let body = format!("<!doctype html><meta charset=utf-8><body style=\"font-family:sans-serif\"><h2>{message}</h2>");
-    let header = tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
-        .expect("valid header");
+    let body = format!(
+        "<!doctype html><meta charset=utf-8><body style=\"font-family:sans-serif\"><h2>{message}</h2>"
+    );
+    let header =
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
+            .expect("valid header");
     tiny_http::Response::from_string(body).with_header(header)
 }
 
@@ -165,7 +171,9 @@ fn random_token(len: usize) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut buf = vec![0u8; len];
     getrandom::getrandom(&mut buf).expect("system RNG unavailable");
-    buf.iter().map(|b| CHARS[*b as usize % CHARS.len()] as char).collect()
+    buf.iter()
+        .map(|b| CHARS[*b as usize % CHARS.len()] as char)
+        .collect()
 }
 
 /// Build the Google authorization URL with all required query params.
@@ -247,7 +255,10 @@ mod tests {
     fn random_token_has_requested_length_and_charset() {
         let t = random_token(64);
         assert_eq!(t.chars().count(), 64);
-        assert!(t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            t.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
         // Overwhelmingly likely to differ across calls.
         assert_ne!(random_token(64), random_token(64));
     }

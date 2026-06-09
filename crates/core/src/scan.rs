@@ -148,7 +148,10 @@ mod tests {
     #[test]
     fn game_of_root_file_is_bucketed() {
         let root = Path::new(r"C:\Videos\NVIDIA");
-        assert_eq!(game_of(root, Path::new(r"C:\Videos\NVIDIA\loose.mp4")), "(root)");
+        assert_eq!(
+            game_of(root, Path::new(r"C:\Videos\NVIDIA\loose.mp4")),
+            "(root)"
+        );
     }
 
     #[test]

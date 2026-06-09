@@ -4,7 +4,6 @@ pub mod auth;
 pub mod upload;
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -12,6 +11,7 @@ use serde::Deserialize;
 
 use crate::config::Config;
 use crate::manifest::{Manifest, Status};
+use crate::progress::{CancelToken, Event, ProgressSink, Stage};
 use crate::scan::human_size;
 
 const FILES_API: &str = "https://www.googleapis.com/drive/v3/files";
@@ -25,10 +25,15 @@ pub struct Options {
     pub limit: Option<usize>,
 }
 
-/// Upload all compressed-but-not-uploaded files to Drive.
-pub fn run(cfg: &Config, opts: &Options) -> Result<()> {
-    let root_name =
-        std::env::var("DRIVE_ROOT_FOLDER").unwrap_or_else(|_| DEFAULT_ROOT.to_string());
+/// Upload all compressed-but-not-uploaded files to Drive, reporting progress
+/// through `sink` and honoring `cancel` (checked between files).
+pub fn run(
+    cfg: &Config,
+    opts: &Options,
+    sink: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
+    let root_name = std::env::var("DRIVE_ROOT_FOLDER").unwrap_or_else(|_| DEFAULT_ROOT.to_string());
     let manifest_path = cfg.manifest.as_path();
     let mut manifest = Manifest::load(manifest_path)?;
 
@@ -42,7 +47,12 @@ pub fn run(cfg: &Config, opts: &Options) -> Result<()> {
         if local.exists() {
             jobs.push((key.clone(), local));
         } else {
-            tracing::warn!("skipping {key}: compressed file not found at {}", local.display());
+            sink.emit(Event::Log {
+                message: format!(
+                    "skipping {key}: compressed file not found at {}",
+                    local.display()
+                ),
+            });
         }
     }
     jobs.sort_by(|a, b| a.0.cmp(&b.0));
@@ -50,21 +60,37 @@ pub fn run(cfg: &Config, opts: &Options) -> Result<()> {
         jobs.truncate(limit);
     }
 
-    println!(
-        "{} file(s) ready to upload into Drive folder '{}'.",
-        jobs.len(),
-        root_name
-    );
+    sink.emit(Event::Log {
+        message: format!(
+            "{} file(s) ready to upload into Drive folder '{}'.",
+            jobs.len(),
+            root_name
+        ),
+    });
 
     if opts.dry_run {
         for (key, local) in &jobs {
             let size = std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
-            println!("DRY  {key}  ({})", human_size(size));
+            sink.emit(Event::Log {
+                message: format!("DRY  {key}  ({})", human_size(size)),
+            });
         }
         return Ok(());
     }
+
+    let total = jobs.len();
+    let total_bytes: u64 = jobs
+        .iter()
+        .map(|(_, p)| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .sum();
+    sink.emit(Event::StageStarted {
+        stage: Stage::Upload,
+        files: total,
+        total_bytes,
+    });
+
     if jobs.is_empty() {
-        println!("Nothing to upload.");
+        sink.emit(upload_finished(0, 0, 0, 0));
         return Ok(());
     }
 
@@ -74,39 +100,100 @@ pub fn run(cfg: &Config, opts: &Options) -> Result<()> {
         .ensure_folder(&root_name, None)
         .context("ensuring Drive root folder")?;
 
-    let (mut uploaded, mut skipped, mut sent_bytes) = (0u64, 0u64, 0u64);
-    for (key, local) in &jobs {
+    let (mut uploaded, mut skipped, mut failed, mut sent_bytes) = (0u64, 0u64, 0u64, 0u64);
+    for (index, (key, local)) in jobs.iter().enumerate() {
+        if cancel.is_cancelled() {
+            break;
+        }
+        let bytes = std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
         let game = game_of(key);
         let file_name = drive_file_name(key);
         let folder_id = drive
             .ensure_folder(&game, Some(&root_id))
             .with_context(|| format!("ensuring Drive folder '{game}'"))?;
 
+        sink.emit(Event::FileStarted {
+            stage: Stage::Upload,
+            key: key.clone(),
+            index: index + 1,
+            total,
+            bytes,
+        });
+
         // Dedup: if it's already in the target folder, mark uploaded and skip.
         if let Some(existing) = drive.find_file(&file_name, &folder_id)? {
             manifest.mark_uploaded(key, &existing);
             manifest.save(manifest_path)?;
             skipped += 1;
-            println!("• already on Drive, skipping: {key}");
+            sink.emit(Event::FileSkipped {
+                stage: Stage::Upload,
+                key: key.clone(),
+                reason: "already on Drive".to_string(),
+            });
             continue;
         }
 
-        print!("↑ uploading {key} … ");
-        std::io::stdout().flush().ok();
-        let id = upload::resumable_upload(&drive.client, &drive.token, local, &file_name, &folder_id)
-            .with_context(|| format!("uploading {key}"))?;
-        manifest.mark_uploaded(key, &id);
-        manifest.save(manifest_path)?;
-        uploaded += 1;
-        sent_bytes += std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
-        println!("done");
+        let progress_key = key.clone();
+        let result = upload::resumable_upload(
+            &drive.client,
+            &drive.token,
+            local,
+            &file_name,
+            &folder_id,
+            |sent, tot| {
+                let fraction = if tot > 0 {
+                    (sent as f64 / tot as f64) as f32
+                } else {
+                    0.0
+                };
+                sink.emit(Event::FileProgress {
+                    key: progress_key.clone(),
+                    fraction,
+                    speed: None,
+                    eta_secs: None,
+                });
+            },
+        );
+
+        match result {
+            Ok(id) => {
+                manifest.mark_uploaded(key, &id);
+                manifest.save(manifest_path)?;
+                uploaded += 1;
+                sent_bytes += bytes;
+                sink.emit(Event::FileFinished {
+                    stage: Stage::Upload,
+                    key: key.clone(),
+                    out_bytes: None,
+                    drive_id: Some(id),
+                });
+            }
+            Err(e) => {
+                failed += 1;
+                sink.emit(Event::FileFailed {
+                    stage: Stage::Upload,
+                    key: key.clone(),
+                    error: format!("{e:#}"),
+                });
+            }
+        }
     }
 
-    println!(
-        "Uploaded {uploaded}, skipped {skipped} already present. {} sent.",
-        human_size(sent_bytes)
-    );
+    sink.emit(upload_finished(uploaded, skipped, failed, sent_bytes));
     Ok(())
+}
+
+/// Build a `StageFinished` event for the upload stage (`in_bytes` carries the
+/// total bytes sent).
+fn upload_finished(uploaded: u64, skipped: u64, failed: u64, sent_bytes: u64) -> Event {
+    Event::StageFinished {
+        stage: Stage::Upload,
+        ok: uploaded,
+        skipped,
+        failed,
+        in_bytes: sent_bytes,
+        out_bytes: 0,
+    }
 }
 
 /// Minimal Drive REST client with a folder-id cache.

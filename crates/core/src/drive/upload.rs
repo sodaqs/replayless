@@ -20,12 +20,14 @@ struct IdResp {
 }
 
 /// Upload `path` into `parent_id` as `name`, returning the new Drive file id.
+/// `on_progress(sent, total)` is invoked after each chunk is acknowledged.
 pub fn resumable_upload(
     client: &reqwest::blocking::Client,
     token: &str,
     path: &Path,
     name: &str,
     parent_id: &str,
+    mut on_progress: impl FnMut(u64, u64),
 ) -> Result<String> {
     let total = std::fs::metadata(path)
         .with_context(|| format!("stat {}", path.display()))?
@@ -43,10 +45,12 @@ pub fn resumable_upload(
         read_full(&mut file, &mut buf[..want])?;
         let range = content_range(offset, offset + want as u64 - 1, total);
 
-        if let Some(id) = put_chunk_with_retry(client, &session, &range, &buf[..want])? {
+        let maybe_id = put_chunk_with_retry(client, &session, &range, &buf[..want])?;
+        offset += want as u64;
+        on_progress(offset, total);
+        if let Some(id) = maybe_id {
             return Ok(id); // final chunk returned the file resource
         }
-        offset += want as u64;
     }
     bail!("upload finished sending bytes but Drive never returned a file id");
 }
@@ -115,7 +119,10 @@ fn put_chunk_with_retry(
                     429 | 500 | 502 | 503 | 504 if attempt < MAX_ATTEMPTS => {
                         sleep(backoff(attempt));
                     }
-                    _ => bail!("chunk PUT failed ({code}): {}", resp.text().unwrap_or_default()),
+                    _ => bail!(
+                        "chunk PUT failed ({code}): {}",
+                        resp.text().unwrap_or_default()
+                    ),
                 }
             }
             Err(e) if attempt < MAX_ATTEMPTS => {
@@ -157,8 +164,14 @@ mod tests {
 
     #[test]
     fn content_range_formats_bytes() {
-        assert_eq!(content_range(0, 16_777_215, 52_428_800), "bytes 0-16777215/52428800");
-        assert_eq!(content_range(16_777_216, 20_000_000, 20_000_001), "bytes 16777216-20000000/20000001");
+        assert_eq!(
+            content_range(0, 16_777_215, 52_428_800),
+            "bytes 0-16777215/52428800"
+        );
+        assert_eq!(
+            content_range(16_777_216, 20_000_000, 20_000_001),
+            "bytes 16777216-20000000/20000001"
+        );
     }
 
     #[test]

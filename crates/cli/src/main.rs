@@ -1,11 +1,5 @@
 mod cli;
-mod compress;
-mod config;
-mod drive;
-mod encode;
-mod manifest;
-mod probe;
-mod scan;
+mod ui;
 
 use std::path::Path;
 
@@ -13,7 +7,8 @@ use anyhow::Result;
 use clap::Parser;
 
 use crate::cli::{Cli, Command};
-use crate::config::Config;
+use vu_core::config::Config;
+use vu_core::progress::CancelToken;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -25,17 +20,19 @@ fn main() -> Result<()> {
     let cfg = Config::load(cli.config.as_deref())?;
 
     match cli.command {
-        Command::Scan => scan::run(&cfg)?,
-        Command::Auth => drive::auth::run(Path::new(".env"))?,
+        Command::Scan => vu_core::scan::run(&cfg)?,
+        Command::Auth => vu_core::drive::auth::run(Path::new(".env"))?,
         Command::Upload(args) => {
-            let opts = drive::Options {
+            let opts = vu_core::drive::Options {
                 dry_run: args.dry_run,
                 limit: args.limit,
             };
-            drive::run(&cfg, &opts)?;
+            let mut sink = ui::CliSink::new();
+            let cancel = CancelToken::new();
+            vu_core::drive::run(&cfg, &opts, &mut sink, &cancel)?;
         }
         Command::Compress(args) => {
-            let overrides = compress::Overrides {
+            let overrides = vu_core::compress::Overrides {
                 codec: args.codec,
                 cq: args.cq,
                 maxrate: args.maxrate,
@@ -45,7 +42,9 @@ fn main() -> Result<()> {
                 dry_run: args.dry_run,
                 limit: args.limit,
             };
-            compress::run(&cfg, &overrides)?;
+            let mut sink = ui::CliSink::new();
+            let cancel = CancelToken::new();
+            vu_core::compress::run(&cfg, &overrides, &mut sink, &cancel)?;
         }
     }
     Ok(())
@@ -55,8 +54,7 @@ fn init_tracing(verbose: bool) {
     use tracing_subscriber::{EnvFilter, fmt};
 
     let default = if verbose { "debug" } else { "info" };
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
     fmt()
         .with_env_filter(filter)
         .with_target(false)
