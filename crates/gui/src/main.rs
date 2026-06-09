@@ -5,7 +5,7 @@
 //! worker thread that streams `vu_core::progress::Event`s into the view.
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use futures::StreamExt;
 use gpui::{
@@ -20,7 +20,7 @@ use gpui_component::{
 };
 use vu_core::compress::{self, Overrides};
 use vu_core::config::{Config, EncodeConfig};
-use vu_core::progress::{CancelToken, Event, ProgressSink, Stage};
+use vu_core::progress::{CancelToken, Event, NullSink, ProgressSink, Stage};
 use vu_core::scan::human_size;
 use vu_core::tooling::{self, ToolStatus};
 
@@ -60,6 +60,30 @@ impl Mode {
             Mode::Both => "mode-both",
         }
     }
+}
+
+/// Rough output-size estimate shown before a compress run.
+struct Preflight {
+    files: usize,
+    bytes_now: u64,
+}
+
+/// Average compaction ratio observed on the real library (187.6 GB → 28.9 GB);
+/// used for an instant estimate before any per-file probing.
+const AVG_RATIO: f64 = 6.5;
+
+/// Scan `source` for videos and tally count + total bytes (fast; no ffprobe).
+fn compute_preflight(source: &Path) -> Option<Preflight> {
+    let cfg = Config {
+        source_dir: source.to_path_buf(),
+        ..Config::default()
+    };
+    let videos = vu_core::scan::collect_videos(&cfg).ok()?;
+    let bytes_now = videos.iter().map(|v| v.bytes).sum();
+    Some(Preflight {
+        files: videos.len(),
+        bytes_now,
+    })
 }
 
 /// Live state of an in-flight (or finished) run, updated from worker events.
@@ -184,23 +208,32 @@ struct AppView {
     ffmpeg: ToolStatus,
     mode: Mode,
     run: Option<RunState>,
+    preflight: Option<Preflight>,
+    installing: bool,
 }
 
 impl AppView {
     fn new() -> Self {
         let cfg = Config::default();
+        let input_dir = Some(cfg.source_dir);
+        let preflight = input_dir.as_deref().and_then(compute_preflight);
         Self {
-            input_dir: Some(cfg.source_dir),
+            input_dir,
             output_dir: Some(cfg.output_dir),
             ffmpeg: tooling::ffmpeg_status(),
             mode: Mode::Compress,
             run: None,
+            preflight,
+            installing: false,
         }
     }
 
     fn set_dir(&mut self, target: Target, path: PathBuf) {
         match target {
-            Target::Input => self.input_dir = Some(path),
+            Target::Input => {
+                self.preflight = compute_preflight(&path);
+                self.input_dir = Some(path);
+            }
             Target::Output => self.output_dir = Some(path),
         }
     }
@@ -250,7 +283,7 @@ impl Render for AppView {
             ),
         };
         let v_re = view.clone();
-        let banner =
+        let mut banner =
             h_flex()
                 .gap_2()
                 .items_center()
@@ -259,6 +292,37 @@ impl Render for AppView {
                 .child(Button::new("recheck").label("Re-check").small().on_click(
                     move |_ev, _w, cx| v_re.update(cx, |this, cx| this.recheck_ffmpeg(cx)),
                 ));
+        if self.ffmpeg == ToolStatus::Missing {
+            let v_inst = view.clone();
+            let installing = self.installing;
+            banner = banner.child(
+                Button::new("install-ffmpeg")
+                    .label(if installing {
+                        "Installing…"
+                    } else {
+                        "Install ffmpeg"
+                    })
+                    .small()
+                    .disabled(installing)
+                    .on_click(move |_ev, _w, cx| install_ffmpeg_action(&v_inst, cx)),
+            );
+        }
+
+        // Pre-flight estimate (compress modes only)
+        let preflight_line =
+            self.mode
+                .does_compress()
+                .then_some(())
+                .and(self.preflight.as_ref().map(|pf| {
+                    let est = (pf.bytes_now as f64 / AVG_RATIO) as u64;
+                    div().text_color(muted).child(SharedString::from(format!(
+                        "Pre-flight: {} files · {} → ~{} (~{:.1}×)",
+                        pf.files,
+                        human_size(pf.bytes_now),
+                        human_size(est),
+                        AVG_RATIO
+                    )))
+                }));
 
         // Mode selector
         let mode_row = h_flex()
@@ -313,6 +377,7 @@ impl Render for AppView {
                     muted,
                 ))
                 .child(mode_row)
+                .children(preflight_line)
                 .child(actions)
                 .children(self.run.as_ref().map(|r| run_panel(r, muted, accent, fg))),
         )
@@ -458,6 +523,32 @@ fn pick_folder(view: &Entity<AppView>, target: Target, cx: &mut App) {
                 });
             });
         }
+    })
+    .detach();
+}
+
+/// Install ffmpeg via winget on a worker thread, then re-check status on the UI.
+fn install_ffmpeg_action(view: &Entity<AppView>, cx: &mut App) {
+    view.update(cx, |this, c| {
+        this.installing = true;
+        c.notify();
+    });
+    let (tx, rx) = futures::channel::oneshot::channel::<ToolStatus>();
+    std::thread::spawn(move || {
+        let mut sink = NullSink;
+        let status = tooling::install_ffmpeg(&mut sink).unwrap_or(ToolStatus::Missing);
+        let _ = tx.send(status);
+    });
+    let view = view.clone();
+    cx.spawn(async move |cx| {
+        let status = rx.await.unwrap_or(ToolStatus::Missing);
+        let _ = cx.update(|app| {
+            view.update(app, |this, c| {
+                this.installing = false;
+                this.ffmpeg = status;
+                c.notify();
+            });
+        });
     })
     .detach();
 }
