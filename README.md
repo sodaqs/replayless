@@ -229,10 +229,10 @@ your Drive).
 | Errors | `anyhow` | in use |
 | Logging | `tracing`, `tracing-subscriber` | in use |
 | Progress bars | `indicatif` | in use |
-| `.env` loading | `dotenvy` | M2 |
-| HTTP (Drive REST) | `reqwest` (**blocking**, rustls) | M2/M3 |
-| Loopback consent | `tiny_http` + `webbrowser` | M2 |
-| PKCE | `sha2` + `base64` | M2 |
+| `.env` loading | `dotenvy` | M2 (CLI) |
+| HTTP (Drive REST) | `reqwest` (**blocking**, rustls) | M2/M3 (`vu-drive`) |
+| Loopback consent | `tiny_http` + `webbrowser` | M2 (`vu-drive`) |
+| PKCE | `sha2` + `base64` | M2 (`vu-drive`) |
 
 > **Synchronous by choice:** uploads run sequentially with blocking `reqwest`
 > (one file at a time — simplest, gentle on Drive's rate limits, no tokio). This
@@ -246,12 +246,12 @@ libav.
 
 ---
 
-## Module layout (realized — workspace as of M6)
+## Module layout (realized — workspace)
 
 ```
-Cargo.toml                 # [workspace] members = core, cli
+Cargo.toml                 # [workspace] members = core, drive, cli, gui
 crates/
-  core/  (lib "vu_core")   # UI-agnostic logic — no clap, no gpui
+  core/   (lib "vu_core")  # UI-agnostic logic — no clap, no gpui, no HTTP
     src/
       lib.rs               # pub module surface
       config.rs            # load/validate config.toml            [done]
@@ -260,18 +260,30 @@ crates/
       probe.rs             # ffprobe: duration/fps/resolution        [done]
       encode.rs            # build args; spawn ffmpeg + -progress     [done]
       compress.rs          # orchestrate compress, --jobs, temp→rename [done]
+      tooling.rs           # ffmpeg/ffprobe detection + winget install  [done]
       progress.rs          # Event / ProgressSink / CancelToken        [done]
-      drive/
-        mod.rs             # ensure folder, upload, dedup, mark manifest [done]
-        auth.rs            # .env load, loopback consent, refresh token   [done]
-        upload.rs          # resumable chunked upload (+ progress cb)      [done]
-  cli/   (bin "video-uploader")
+  drive/  (lib "vu_drive") # Google Drive — depends on vu-core
     src/
-      main.rs              # clap dispatch -> core                  [done]
+      lib.rs               # ensure folder, upload, dedup, mark manifest [done]
+      auth.rs              # .env load, loopback consent, refresh token   [done]
+      upload.rs            # resumable chunked upload (+ progress cb)      [done]
+  cli/    (bin "video-uploader")
+    src/
+      main.rs              # clap dispatch -> core + drive          [done]
       cli.rs               # clap definitions                       [done]
       ui.rs                # indicatif ProgressSink for the CLI      [done]
-  gui/   (bin, planned M7+) # gpui app -> core (channel sink)
+  gui/    (bin, planned M7+) # gpui app -> core + drive (channel sink)
 ```
+
+**Why `drive` is its own crate.** Google Drive support pulls in a heavy
+HTTP/OAuth dependency surface — `reqwest` (+ rustls), `tiny_http`, `sha2`,
+`base64`, `getrandom`, `url`, `webbrowser` — that nothing else in `core` needs.
+Splitting it into `vu-drive` keeps `core` lean (just `anyhow`, `serde`,
+`serde_json`, `toml`, `walkdir`) so the compress-only path and its tests build
+without the networking stack. `vu-drive` depends on `vu-core` for the shared `Config`, `Manifest`, and
+`progress::{Event, ProgressSink, CancelToken}` types; **nothing in `core`
+depends back on `drive`**, so there's no cycle. Front-ends (CLI now, GUI later)
+depend on both.
 
 ---
 
@@ -311,20 +323,22 @@ dependency never touches the CLI build:
 video-uploader/                # workspace root
   Cargo.toml                   # [workspace] members = ["crates/*"]
   crates/
-    core/                      # all logic — no UI, no clap, no gpui
+    core/                      # non-Drive logic — no UI, no clap, no gpui, no HTTP
       scan.rs  probe.rs  encode.rs  compress.rs
       manifest.rs  config.rs  tooling.rs  estimate.rs
       progress.rs              # ProgressSink trait + Event enum + CancelToken
-      drive/{mod,auth,upload}.rs
-    cli/                       # thin clap binary -> core (indicatif sink)
+    drive/                     # Google Drive OAuth + resumable upload (-> core)
+      lib.rs  auth.rs  upload.rs
+    cli/                       # thin clap binary -> core + drive (indicatif sink)
       main.rs  cli.rs
-    gui/                       # gpui app -> core (channel sink)
+    gui/                       # gpui app -> core + drive (channel sink)
       main.rs  app.rs  state.rs  views/...
 ```
 
 Today's `src/*.rs` move almost verbatim into `crates/core`; `main.rs` becomes
-`crates/cli`. The only behavioral change to core is the progress/cancel refactor
-below — **which the CLI benefits from too.**
+`crates/cli`; the Drive modules become the standalone `crates/drive`. The only
+behavioral change to core is the progress/cancel refactor below — **which the
+CLI benefits from too.**
 
 ### Core refactor (prerequisite — benefits CLI + GUI)
 
@@ -485,10 +499,10 @@ let (cfg, ov, opts) = state.to_run_inputs();
 cx.background_spawn(async move {                 // blocking pipeline OFF the UI thread
     let mut sink = ChannelSink(tx);             // impl ProgressSink
     if mode.does_compress() && !cancel.is_cancelled() {
-        core::compress::run(&cfg, &ov, &mut sink, &cancel);
+        vu_core::compress::run(&cfg, &ov, &mut sink, &cancel);
     }
     if mode.does_upload() && !cancel.is_cancelled() {
-        core::drive::run(&cfg, &opts, &mut sink, &cancel);
+        vu_drive::run(&cfg, &opts, &mut sink, &cancel);   // separate crate
     }
 }).detach();
 

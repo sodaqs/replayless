@@ -1,4 +1,10 @@
-//! Google Drive integration: OAuth via `.env` (auth) and resumable uploads.
+//! Google Drive integration for **video-uploader**: OAuth via `.env` (auth) and
+//! resumable chunked uploads.
+//!
+//! This crate sits on top of [`vu_core`] — it reuses core's [`Config`],
+//! [`Manifest`], and [`progress`](vu_core::progress) types but adds the heavier
+//! HTTP/OAuth dependency surface (`reqwest`, `tiny_http`, `sha2`, …) that the
+//! rest of core doesn't need. Front-ends depend on both crates.
 
 pub mod auth;
 pub mod upload;
@@ -9,10 +15,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::config::Config;
-use crate::manifest::{Manifest, Status};
-use crate::progress::{CancelToken, Event, ProgressSink, Stage};
-use crate::scan::human_size;
+use vu_core::config::Config;
+use vu_core::manifest::{Manifest, Status};
+use vu_core::progress::{CancelToken, Event, ProgressSink, Stage};
+use vu_core::scan::human_size;
 
 const FILES_API: &str = "https://www.googleapis.com/drive/v3/files";
 const FOLDER_MIME: &str = "application/vnd.google-apps.folder";

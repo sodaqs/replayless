@@ -3,19 +3,12 @@ name = "vu-core"
 version = "0.1.0"
 edition = "2024"
 
-# UI-agnostic core: scan, compress (NVENC), manifest, Drive upload.
-# No clap, no gpui — front-ends depend on this.
+# UI-agnostic core: scan, compress (NVENC), manifest, progress/cancel.
+# No clap, no gpui, no HTTP — front-ends depend on this. Drive upload (and its
+# reqwest/OAuth dependency surface) lives in the sibling `vu-drive` crate.
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
-getrandom = "0.2"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
-tiny_http = "0.12"
 toml = "0.8"
-tracing = "0.1"
-url = "2"
 walkdir = "2"
-webbrowser = "1"

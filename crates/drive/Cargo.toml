@@ -1,0 +1,21 @@
+[package]
+name = "vu-drive"
+version = "0.1.0"
+edition = "2024"
+
+# Google Drive integration: OAuth (loopback consent + refresh token) and
+# resumable chunked uploads. Depends on vu-core for config/manifest/progress;
+# nothing in core depends back on this crate.
+[dependencies]
+vu-core = { path = "../core" }
+anyhow = "1"
+base64 = "0.22"
+getrandom = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tiny_http = "0.12"
+tracing = "0.1"
+url = "2"
+webbrowser = "1"

@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 vu-core = { path = "../core" }
+vu-drive = { path = "../drive" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 dotenvy = "0.15"

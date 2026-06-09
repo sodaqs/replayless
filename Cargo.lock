@@ -6699,6 +6699,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "vu-core",
+ "vu-drive",
 ]
 
 [[package]]
@@ -6736,6 +6737,17 @@ name = "vu-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "walkdir",
+]
+
+[[package]]
+name = "vu-drive"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "base64",
  "getrandom 0.2.17",
  "reqwest",
@@ -6743,10 +6755,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "tiny_http",
- "toml 0.8.23",
  "tracing",
  "url",
- "walkdir",
+ "vu-core",
  "webbrowser",
 ]
 

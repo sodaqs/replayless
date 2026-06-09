@@ -21,15 +21,15 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Scan => vu_core::scan::run(&cfg)?,
-        Command::Auth => vu_core::drive::auth::run(Path::new(".env"))?,
+        Command::Auth => vu_drive::auth::run(Path::new(".env"))?,
         Command::Upload(args) => {
-            let opts = vu_core::drive::Options {
+            let opts = vu_drive::Options {
                 dry_run: args.dry_run,
                 limit: args.limit,
             };
             let mut sink = ui::CliSink::new();
             let cancel = CancelToken::new();
-            vu_core::drive::run(&cfg, &opts, &mut sink, &cancel)?;
+            vu_drive::run(&cfg, &opts, &mut sink, &cancel)?;
         }
         Command::Compress(args) => {
             let overrides = vu_core::compress::Overrides {
