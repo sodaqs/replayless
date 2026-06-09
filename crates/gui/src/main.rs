@@ -62,15 +62,59 @@ impl Mode {
     }
 }
 
+/// Encode quality preset → (cq, maxrate). Lower cq = higher quality / bigger.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Quality {
+    Balanced,
+    Smaller,
+    Higher,
+}
+
+impl Quality {
+    fn label(self) -> &'static str {
+        match self {
+            Quality::Balanced => "Balanced",
+            Quality::Smaller => "Smaller",
+            Quality::Higher => "Higher quality",
+        }
+    }
+    fn id(self) -> &'static str {
+        match self {
+            Quality::Balanced => "q-balanced",
+            Quality::Smaller => "q-smaller",
+            Quality::Higher => "q-higher",
+        }
+    }
+    fn cq(self) -> u32 {
+        match self {
+            Quality::Balanced => 30,
+            Quality::Smaller => 32,
+            Quality::Higher => 28,
+        }
+    }
+    fn maxrate(self) -> &'static str {
+        match self {
+            Quality::Balanced => "12M",
+            Quality::Smaller => "8M",
+            Quality::Higher => "16M",
+        }
+    }
+    /// Rough average compaction ratio for the pre-flight estimate; the Balanced
+    /// value matches the real library run (187.6 GB → 28.9 GB ≈ 6.5×).
+    fn est_ratio(self) -> f64 {
+        match self {
+            Quality::Balanced => 6.5,
+            Quality::Smaller => 9.0,
+            Quality::Higher => 5.0,
+        }
+    }
+}
+
 /// Rough output-size estimate shown before a compress run.
 struct Preflight {
     files: usize,
     bytes_now: u64,
 }
-
-/// Average compaction ratio observed on the real library (187.6 GB → 28.9 GB);
-/// used for an instant estimate before any per-file probing.
-const AVG_RATIO: f64 = 6.5;
 
 /// Scan `source` for videos and tally count + total bytes (fast; no ffprobe).
 fn compute_preflight(source: &Path) -> Option<Preflight> {
@@ -207,6 +251,8 @@ struct AppView {
     output_dir: Option<PathBuf>,
     ffmpeg: ToolStatus,
     mode: Mode,
+    quality: Quality,
+    jobs: usize,
     run: Option<RunState>,
     preflight: Option<Preflight>,
     installing: bool,
@@ -222,6 +268,8 @@ impl AppView {
             output_dir: Some(cfg.output_dir),
             ffmpeg: tooling::ffmpeg_status(),
             mode: Mode::Compress,
+            quality: Quality::Balanced,
+            jobs: 1,
             run: None,
             preflight,
             installing: false,
@@ -308,19 +356,20 @@ impl Render for AppView {
             );
         }
 
-        // Pre-flight estimate (compress modes only)
+        // Pre-flight estimate (compress modes only); ratio depends on the preset.
+        let ratio = self.quality.est_ratio();
         let preflight_line =
             self.mode
                 .does_compress()
                 .then_some(())
                 .and(self.preflight.as_ref().map(|pf| {
-                    let est = (pf.bytes_now as f64 / AVG_RATIO) as u64;
+                    let est = (pf.bytes_now as f64 / ratio) as u64;
                     div().text_color(muted).child(SharedString::from(format!(
                         "Pre-flight: {} files · {} → ~{} (~{:.1}×)",
                         pf.files,
                         human_size(pf.bytes_now),
                         human_size(est),
-                        AVG_RATIO
+                        ratio
                     )))
                 }));
 
@@ -332,6 +381,21 @@ impl Render for AppView {
             .child(mode_button(&view, Mode::Compress, self.mode))
             .child(mode_button(&view, Mode::Upload, self.mode))
             .child(mode_button(&view, Mode::Both, self.mode));
+
+        // Encode settings (compress modes only): quality preset + jobs.
+        let settings_row = self.mode.does_compress().then(|| {
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(div().w(px(110.)).child("Quality"))
+                .child(quality_button(&view, Quality::Balanced, self.quality))
+                .child(quality_button(&view, Quality::Smaller, self.quality))
+                .child(quality_button(&view, Quality::Higher, self.quality))
+                .child(div().w(px(24.)))
+                .child(div().text_color(muted).child("Jobs"))
+                .child(jobs_button(&view, 1, self.jobs))
+                .child(jobs_button(&view, 2, self.jobs))
+        });
 
         // Start / Cancel
         let v_start = view.clone();
@@ -377,6 +441,7 @@ impl Render for AppView {
                     muted,
                 ))
                 .child(mode_row)
+                .children(settings_row)
                 .children(preflight_line)
                 .child(actions)
                 .children(self.run.as_ref().map(|r| run_panel(r, muted, accent, fg))),
@@ -430,6 +495,44 @@ fn mode_button(view: &Entity<AppView>, mode: Mode, current: Mode) -> Button {
             })
         });
     if mode == current {
+        button.primary()
+    } else {
+        button
+    }
+}
+
+/// A quality-preset button, highlighted when it's the active preset.
+fn quality_button(view: &Entity<AppView>, quality: Quality, current: Quality) -> Button {
+    let v = view.clone();
+    let button = Button::new(quality.id())
+        .label(quality.label())
+        .small()
+        .on_click(move |_ev, _w, cx| {
+            v.update(cx, |this, c| {
+                this.quality = quality;
+                c.notify();
+            })
+        });
+    if quality == current {
+        button.primary()
+    } else {
+        button
+    }
+}
+
+/// A jobs-count button (1 or 2 concurrent NVENC sessions).
+fn jobs_button(view: &Entity<AppView>, jobs: usize, current: usize) -> Button {
+    let v = view.clone();
+    let button = Button::new(if jobs == 1 { "jobs-1" } else { "jobs-2" })
+        .label(jobs.to_string())
+        .small()
+        .on_click(move |_ev, _w, cx| {
+            v.update(cx, |this, c| {
+                this.jobs = jobs;
+                c.notify();
+            })
+        });
+    if jobs == current {
         button.primary()
     } else {
         button
@@ -565,9 +668,15 @@ impl ProgressSink for ChannelSink {
 /// Kick off a run: spawn the blocking pipeline on a worker thread and drain its
 /// progress events into the view on gpui's foreground executor.
 fn start_run(view: &Entity<AppView>, cx: &mut App) {
-    let (mode, input, output) = {
+    let (mode, input, output, quality, jobs) = {
         let v = view.read(cx);
-        (v.mode, v.input_dir.clone(), v.output_dir.clone())
+        (
+            v.mode,
+            v.input_dir.clone(),
+            v.output_dir.clone(),
+            v.quality,
+            v.jobs,
+        )
     };
     let Some(output) = output else { return };
     if mode.does_compress() && input.is_none() {
@@ -600,7 +709,9 @@ fn start_run(view: &Entity<AppView>, cx: &mut App) {
         let mut sink = ChannelSink(tx);
         if mode.does_compress() && !worker_cancel.is_cancelled() {
             let ov = Overrides {
-                jobs: Some(1),
+                cq: Some(quality.cq()),
+                maxrate: Some(quality.maxrate().to_string()),
+                jobs: Some(jobs),
                 ..Default::default()
             };
             if let Err(e) = compress::run(&cfg, &ov, &mut sink, &worker_cancel) {
@@ -698,4 +809,86 @@ fn main() {
 
         cx.activate(true);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mode_dispatch() {
+        assert!(Mode::Compress.does_compress() && !Mode::Compress.does_upload());
+        assert!(Mode::Upload.does_upload() && !Mode::Upload.does_compress());
+        assert!(Mode::Both.does_compress() && Mode::Both.does_upload());
+    }
+
+    #[test]
+    fn quality_presets_map_to_cq_and_maxrate() {
+        assert_eq!(Quality::Balanced.cq(), 30);
+        assert_eq!(Quality::Smaller.cq(), 32);
+        assert_eq!(Quality::Higher.cq(), 28);
+        assert_eq!(Quality::Balanced.maxrate(), "12M");
+        assert_eq!(Quality::Smaller.maxrate(), "8M");
+        assert_eq!(Quality::Higher.maxrate(), "16M");
+    }
+
+    #[test]
+    fn quality_est_ratio_orders_smaller_highest() {
+        assert!(Quality::Smaller.est_ratio() > Quality::Balanced.est_ratio());
+        assert!(Quality::Balanced.est_ratio() > Quality::Higher.est_ratio());
+    }
+
+    #[test]
+    fn run_state_tracks_progress_and_completion() {
+        let mut r = RunState::new(CancelToken::new());
+        r.apply(Event::StageStarted {
+            stage: Stage::Compress,
+            files: 2,
+            total_bytes: 100,
+        });
+        assert_eq!(r.files_total, 2);
+        r.apply(Event::FileStarted {
+            stage: Stage::Compress,
+            key: "a".into(),
+            index: 1,
+            total: 2,
+            bytes: 50,
+        });
+        assert_eq!(r.current_file.as_deref(), Some("a"));
+        r.apply(Event::FileProgress {
+            key: "a".into(),
+            fraction: 0.5,
+            speed: Some(4.0),
+            eta_secs: Some(10),
+        });
+        assert_eq!(r.current_fraction, 0.5);
+        r.apply(Event::FileFinished {
+            stage: Stage::Compress,
+            key: "a".into(),
+            out_bytes: Some(10),
+            drive_id: None,
+        });
+        assert_eq!(r.files_done, 1);
+        assert!(r.current_file.is_none());
+        r.apply(Event::FileFailed {
+            stage: Stage::Compress,
+            key: "b".into(),
+            error: "boom".into(),
+        });
+        assert_eq!(r.files_done, 2);
+        assert_eq!(r.failed, 1);
+    }
+
+    #[test]
+    fn fmt_eta_scales_units() {
+        assert_eq!(fmt_eta(42), "42s");
+        assert_eq!(fmt_eta(185), "3m05s");
+        assert_eq!(fmt_eta(3725), "1h02m");
+    }
+
+    #[test]
+    fn basename_takes_final_component() {
+        assert_eq!(basename("Far Cry 6/clip.mp4"), "clip.mp4");
+        assert_eq!(basename("loose.mp4"), "loose.mp4");
+    }
 }
