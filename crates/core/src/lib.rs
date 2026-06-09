@@ -13,3 +13,4 @@ pub mod manifest;
 pub mod probe;
 pub mod progress;
 pub mod scan;
+pub mod tooling;

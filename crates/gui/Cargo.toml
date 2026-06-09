@@ -1,0 +1,16 @@
+[package]
+name = "video-uploader-gui"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "video-uploader-gui"
+path = "src/main.rs"
+
+# Pinned to crates.io releases (not the Zed monorepo git dep): gpui-component
+# 0.5.x depends on gpui ^0.2.2, so these resolve to a consistent set.
+[dependencies]
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+vu-core = { path = "../core" }
+anyhow = "1"

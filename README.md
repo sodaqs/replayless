@@ -576,10 +576,13 @@ can kill the live ffmpeg child deterministically and finish cleanup.
       `indicatif` sink; added per-chunk upload progress. 54 tests pass; clippy +
       fmt clean; single-file compress live-verified (9.5 MB → 2.9 MB, no leftover
       temp).
-- [ ] **M7 — GUI spike:** workspace `crates/gui`; prove gpui + gpui-component
-      build and open a window on this machine; build the in-app folder-picker
-      `Dialog` and the ffmpeg banner (`tooling` check + winget install). De-risks
-      the unknowns before building real UI.
+- [ ] **M7 — GUI spike:** *Window proven.* `crates/gui` builds on crates.io
+      `gpui 0.2.2` + `gpui-component 0.5.1` (no Zed-monorepo git dep); a window
+      opens **and runs** on this machine (RTX 5070 / Win11) — DirectX init OK.
+      `core::tooling` (ffmpeg/ffprobe detection + non-interactive
+      `winget install Gyan.FFmpeg`) added with tests. **Remaining:** the in-app
+      folder-picker `Dialog` and the ffmpeg/Drive readiness banners wired into
+      the GUI.
 - [ ] **M8 — Compress UI:** mode selector (Compress active; Upload/Both wired in
       M9), pre-flight summary (size before / estimated after), Start/Cancel,
       overall + per-file progress with ETA, log panel + toasts, prefs persistence
