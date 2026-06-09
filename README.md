@@ -301,8 +301,8 @@ over the same core**, not a rewrite.
 - **Choose the operation** — **Compress only**, **Upload only**, or
   **Compress + Upload**. The rest of the UI adapts: required folders, readiness
   checks, and the pre-flight summary all depend on the chosen mode.
-- Pick **input** (source) and/or **output** folders via the in-app folder picker
-  (input is only needed when compressing).
+- Pick **input** (source) and/or **output** folders via the native OS folder
+  dialog (input is only needed when compressing).
 - **Readiness checks** before Start: `ffmpeg`/`ffprobe` present (Compress / Both —
   offer a `winget` install if missing); Drive auth available in `.env`
   (Upload / Both).
@@ -449,8 +449,8 @@ app.run(|cx| {
 
 **Views** (gpui-component widgets):
 
-- Folder row — two read-only inputs + **Browse** buttons (open the in-app
-  folder-picker `Dialog`).
+- Folder row — two read-only inputs + **Browse** buttons (open the native OS
+  folder dialog).
 - **Mode selector** — a segmented control: **Compress** / **Upload** /
   **Compress + Upload**. Switching it shows/hides the input-folder row, the
   ffmpeg banner, and the Drive banner, and reshapes the pre-flight card.
@@ -468,21 +468,17 @@ app.run(|cx| {
 - **Upload section** — mirrors compress (overall + per-file send progress).
 - **Log panel** + completion/error **toasts** (notifications).
 
-**Folder picker — in-app `Dialog` (gpui-component).** Folder selection happens
-in a modal built on gpui-component's `Dialog`, so it matches the app theme and
-pulls in no extra crate (gpui-component has **no native OS file dialog** — only
-in-app modals, so we render the browser ourselves):
+**Folder picker — native OS dialog.** Browse opens the platform's native folder
+chooser via gpui's built-in `prompt_for_paths({ directories: true, files: false })`
+(Windows `IFileOpenDialog`) — the expected UX, with **no extra crate**. It runs
+asynchronously on gpui's executor (`cx.spawn` + the result channel) so the window
+never blocks; the chosen `PathBuf` is written into `input_dir` / `output_dir`.
 
-- an editable **path `Input`** — type/paste a path to jump straight there;
-- an **Up / breadcrumb** row, and at the top level on Windows a **drive
-  selector** (enumerate `C:\`, `D:\`, … by probing `A:`–`Z:`);
-- a **virtualized `List`** of sub-folders (folder icon + name; click to enter,
-  Select to choose), read via `std::fs::read_dir` (directories only, sorted);
-- **Cancel / Select** footer; the chosen `PathBuf` flows into `input_dir` /
-  `output_dir`.
-
-gpui-component's `Dialog` / `AlertDialog` is reused for confirmations (e.g.
-overwrite warnings), and `Notification` for done/error toasts.
+> An earlier in-app `Dialog`-based browser was tried and dropped: it didn't match
+> what users expect, and reading the view's state inside the dialog builder during
+> render caused a re-entrant-borrow panic. The native prompt is simpler and avoids
+> both. (gpui 0.2.2's prompt has no initial-directory option; switch to the `rfd`
+> crate if "open at the current folder" is wanted.)
 
 ### Background / threading bridge
 
@@ -531,7 +527,7 @@ can kill the live ffmpeg child deterministically and finish cleanup.
 | UI framework | `gpui`, `gpui_platform` (git, `zed-industries/zed`) |
 | Widgets + assets | `gpui-component`, `gpui-component-assets` (git, `longbridge`) |
 | Channel to UI | `smol` (or `futures` mpsc) |
-| Folder picker | in-app gpui-component `Dialog` + `std::fs` (no extra crate) |
+| Folder picker | native OS dialog via gpui `prompt_for_paths` (built-in) |
 | Config dir / prefs | `directories` |
 | ETA formatting | reuse `human_size`; `humantime` for durations |
 
@@ -590,13 +586,14 @@ can kill the live ffmpeg child deterministically and finish cleanup.
       `indicatif` sink; added per-chunk upload progress. 54 tests pass; clippy +
       fmt clean; single-file compress live-verified (9.5 MB → 2.9 MB, no leftover
       temp).
-- [ ] **M7 — GUI spike:** *Window proven.* `crates/gui` builds on crates.io
-      `gpui 0.2.2` + `gpui-component 0.5.1` (no Zed-monorepo git dep); a window
-      opens **and runs** on this machine (RTX 5070 / Win11) — DirectX init OK.
-      `core::tooling` (ffmpeg/ffprobe detection + non-interactive
-      `winget install Gyan.FFmpeg`) added with tests. **Remaining:** the in-app
-      folder-picker `Dialog` and the ffmpeg/Drive readiness banners wired into
-      the GUI.
+- [x] **M7 — GUI spike + main window:** *Done.* `crates/gui` builds on crates.io
+      `gpui 0.2.2` + `gpui-component 0.5.1` (no Zed-monorepo git dep); the window
+      opens and runs on this machine (RTX 5070 / Win11). Main view has the ffmpeg
+      readiness banner (`core::tooling`: detection + non-interactive
+      `winget install Gyan.FFmpeg`, tested) and source/output folder rows whose
+      **Browse** opens the **native OS folder dialog** (`prompt_for_paths`, async,
+      no extra crate). *Deferred to M8:* the winget Install button (needs the
+      background-task bridge) and Drive readiness banner.
 - [ ] **M8 — Compress UI:** mode selector (Compress active; Upload/Both wired in
       M9), pre-flight summary (size before / estimated after), Start/Cancel,
       overall + per-file progress with ETA, log panel + toasts, prefs persistence
