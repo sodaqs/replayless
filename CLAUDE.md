@@ -9,11 +9,11 @@ uploads them to Google Drive**, preserving the per-game folder structure.
 Source: `C:\Users\fruit\Videos\NVIDIA\<Game>\*.mp4` — ~213 files, ~188 GB,
 2560×1440 @ 30 fps H.264 ~60 Mbps. Goal: shrink ~6–8× (to ~20–30 GB), then upload.
 
-Status: **M0–M3 done** — `scan`, `compress` (NVENC, resumable manifest), `auth`
-(Drive OAuth via `.env`), and `upload` (folder tree, dedup-skip, sequential
-resumable chunked upload, marks manifest `uploaded`) all work. `.env` is
-configured and `auth` succeeded. Next: a first live `upload`, then M4 (`run`
-pipeline + `status`). 4 clips compressed; 209 pending.
+Status: **M0–M3 done, full pipeline live-verified** — `scan`, `compress` (NVENC,
+resumable manifest), `auth` (Drive OAuth via `.env`), and `upload` (folder tree,
+dedup-skip, sequential resumable chunked upload) all work; a real 234 MB clip
+uploaded to Drive successfully. `.env` configured, Drive API enabled. Next: M4
+(`run` pipeline + `status`). 4 clips compressed (1 uploaded); 209 to compress.
 
 ## Environment (this machine)
 
