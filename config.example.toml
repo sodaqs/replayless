@@ -1,8 +1,8 @@
 # Copy to config.toml and adjust. config.toml is git-ignored (machine-specific).
 # Every field is optional; omitted values fall back to the defaults shown here.
 
-source_dir = 'C:\Users\fruit\Videos\NVIDIA'
-output_dir = 'C:\Users\fruit\Videos\NVIDIA_compact'
+source_dir = 'C:\Users\<you>\Videos\NVIDIA'
+output_dir = 'C:\Users\<you>\Videos\NVIDIA_compact'
 manifest   = 'manifest.json'
 
 [encode]

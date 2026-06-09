@@ -27,11 +27,21 @@ pub struct EncodeConfig {
     pub scale: Option<String>,
 }
 
+/// `%USERPROFILE%\Videos\<subdir>` (or `$HOME/Videos/<subdir>`), with a relative
+/// fallback. Derived at runtime so no username is hard-coded into the binary.
+fn default_videos_dir(subdir: &str) -> PathBuf {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    home.join("Videos").join(subdir)
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
-            source_dir: PathBuf::from(r"C:\Users\fruit\Videos\NVIDIA"),
-            output_dir: PathBuf::from(r"C:\Users\fruit\Videos\NVIDIA_compact"),
+            source_dir: default_videos_dir("NVIDIA"),
+            output_dir: default_videos_dir("NVIDIA_compact"),
             manifest: PathBuf::from("manifest.json"),
             encode: EncodeConfig::default(),
         }

@@ -1,7 +1,7 @@
 # video-uploader
 
 A Rust CLI that takes the NVIDIA ShadowPlay/Instant-Replay recordings in
-`C:\Users\fruit\Videos\NVIDIA`, **re-encodes them into compact versions** with
+`C:\Users\<you>\Videos\NVIDIA`, **re-encodes them into compact versions** with
 the GPU (NVENC), and **uploads them to Google Drive**, preserving the per-game
 folder structure.
 
@@ -13,7 +13,7 @@ NVIDIA replays are stored per game and are enormous:
 
 | | |
 |---|---|
-| Location | `C:\Users\fruit\Videos\NVIDIA\<Game Name>\*.mp4` |
+| Location | `C:\Users\<you>\Videos\NVIDIA\<Game Name>\*.mp4` |
 | Count | **213 files** across ~85 game folders |
 | Total size | **~188 GB** |
 | Source format | H.264, mostly **2560×1440 @ 30 fps**; bitrate **median ~43 Mbps, up to ~93 Mbps** (sampled 54 files) + AAC audio |
@@ -162,8 +162,8 @@ Cleanup (opt-in, destructive):
 ## Configuration (`config.toml`)
 
 ```toml
-source_dir   = 'C:\Users\fruit\Videos\NVIDIA'
-output_dir   = 'C:\Users\fruit\Videos\NVIDIA_compact'
+source_dir   = 'C:\Users\<you>\Videos\NVIDIA'
+output_dir   = 'C:\Users\<you>\Videos\NVIDIA_compact'
 manifest     = './manifest.json'
 
 [encode]

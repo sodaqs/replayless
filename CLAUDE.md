@@ -6,7 +6,7 @@ Essentials for working in this repo. See [README.md](README.md) for the full pla
 
 A Rust CLI that **compresses NVIDIA replay videos with the GPU (NVENC) and
 uploads them to Google Drive**, preserving the per-game folder structure.
-Source: `C:\Users\fruit\Videos\NVIDIA\<Game>\*.mp4` — ~213 files, ~188 GB,
+Source: `C:\Users\<you>\Videos\NVIDIA\<Game>\*.mp4` — ~213 files, ~188 GB,
 2560×1440 @ 30 fps H.264 ~60 Mbps. Goal: shrink ~6–8× (to ~20–30 GB), then upload.
 
 Status: **M0–M3 done, full pipeline live-verified** — `scan`, `compress` (NVENC,
