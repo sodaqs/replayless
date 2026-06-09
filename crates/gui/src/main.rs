@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use futures::StreamExt;
 use gpui::{
     App, AppContext, Application, Bounds, Context, Entity, Hsla, IntoElement, ParentElement,
-    PathPromptOptions, Render, SharedString, Styled, Window, WindowBounds, WindowOptions, div, px,
-    relative, size,
+    PathPromptOptions, Render, SharedString, Styled, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, div, px, relative, size,
 };
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Root, Sizable,
@@ -358,7 +358,7 @@ impl Render for AppView {
         div().size_full().bg(bg).text_color(fg).p_4().child(
             v_flex()
                 .gap_4()
-                .child(div().text_xl().child("video-uploader"))
+                .child(div().text_xl().child("Replayless"))
                 .child(banner)
                 .child(self.folder_row(
                     &view,
@@ -678,9 +678,15 @@ fn main() {
     Application::new().run(|cx: &mut App| {
         gpui_component::init(cx);
 
-        let bounds = Bounds::centered(None, size(px(760.0), px(560.0)), cx);
+        // 16:9 initial size, with a 16:9 minimum so the layout never gets cramped.
+        let bounds = Bounds::centered(None, size(px(1024.0), px(576.0)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_min_size: Some(size(px(768.0), px(432.0))),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Replayless".into()),
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
