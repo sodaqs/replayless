@@ -1,10 +1,9 @@
 //! Frontend-agnostic progress reporting + cooperative cancellation.
 //!
-//! Core stages ([`crate::compress`], [`crate::drive`]) report what they're doing
-//! by emitting [`Event`]s into a [`ProgressSink`] and check a [`CancelToken`]
-//! between units of work. This keeps the core free of any specific UI: the CLI
-//! renders events with `indicatif`, the GUI forwards them to a channel, and tests
-//! collect them into a `Vec`.
+//! Core stages report what they're doing by emitting [`Event`]s into a
+//! [`ProgressSink`] and check a [`CancelToken`] between units of work. This keeps
+//! the core free of any specific UI: the CLI renders events with `indicatif`, the
+//! GUI forwards them to a channel, and tests collect them into a `Vec`.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +12,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Compress,
-    Upload,
 }
 
 /// A single progress event. Units that differ between stages (encoded seconds
@@ -44,15 +42,13 @@ pub enum Event {
         speed: Option<f32>,
         eta_secs: Option<u64>,
     },
-    /// A file finished successfully. `out_bytes` is set for compression,
-    /// `drive_id` for uploads.
+    /// A file finished successfully.
     FileFinished {
         stage: Stage,
         key: String,
         out_bytes: Option<u64>,
-        drive_id: Option<String>,
     },
-    /// A file was skipped (already compressed, or already present on Drive).
+    /// A file was skipped (already compressed).
     FileSkipped {
         stage: Stage,
         key: String,

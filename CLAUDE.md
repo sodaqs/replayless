@@ -4,16 +4,13 @@ Essentials for working in this repo. See [README.md](README.md) for the full pla
 
 ## What this is
 
-A Rust CLI that **compresses NVIDIA replay videos with the GPU (NVENC) and
-uploads them to Google Drive**, preserving the per-game folder structure.
+A Rust CLI + GUI that **compresses NVIDIA replay videos with the GPU (NVENC)**,
+preserving the per-game folder structure.
 Source: `C:\Users\<you>\Videos\NVIDIA\<Game>\*.mp4` — ~213 files, ~188 GB,
-2560×1440 @ 30 fps H.264 ~60 Mbps. Goal: shrink ~6–8× (to ~20–30 GB), then upload.
+2560×1440 @ 30 fps H.264 ~60 Mbps. Goal: shrink ~6–8× (to ~20–30 GB).
 
-Status: **M0–M3 done, full pipeline live-verified** — `scan`, `compress` (NVENC,
-resumable manifest), `auth` (Drive OAuth via `.env`), and `upload` (folder tree,
-dedup-skip, sequential resumable chunked upload) all work; a real 234 MB clip
-uploaded to Drive successfully. `.env` configured, Drive API enabled. Next: M4
-(`run` pipeline + `status`). 4 clips compressed (1 uploaded); 209 to compress.
+Status: **M0–M1 done, compress pipeline live-verified** — `scan` and `compress`
+(NVENC, resumable manifest) work end-to-end. 4 clips compressed; 209 to go.
 
 ## Environment (this machine)
 
@@ -27,19 +24,19 @@ uploaded to Drive successfully. `.env` configured, Drive API enabled. Next: M4
 
 ## Commands
 
+The workspace has two binaries (CLI + GUI), so `cargo run` needs `--bin`:
+
 ```powershell
-cargo build                 # build
-cargo run -- scan           # list source videos + totals (read-only)
-cargo run -- compress       # transcode pending videos
-cargo run -- upload         # upload to Drive
-cargo run -- run            # full pipeline
-cargo run -- status         # manifest progress
+cargo build                                   # build
+cargo run --bin video-uploader -- scan        # list source videos + totals (read-only)
+cargo run --bin video-uploader -- setup       # ensure ffmpeg (winget-installs if missing)
+cargo run --bin video-uploader -- compress    # transcode pending (auto-ensures ffmpeg first)
 cargo test
 cargo clippy --all-targets
 cargo fmt
 ```
 
-## Architecture (planned — see README for full layout)
+## Architecture (see README for full layout)
 
 `main.rs` → `cli.rs` (clap) dispatches to stages, each idempotent and driven by
 `manifest.json`:
@@ -48,11 +45,8 @@ cargo fmt
   *directly* contains `.mp4`s; this skips NVIDIA's junk folders like `Steam`).
 - `encode.rs` — build/run ffmpeg NVENC command; output mirrors game folders;
   skip if output exists & newer than source.
-- `drive/{auth,upload,mod}.rs` — auth from `.env` (`dotenvy`), loopback OAuth
-  consent + refresh-token grant (hand-rolled, no `yup-oauth2`), **blocking**
-  `reqwest` resumable uploads; ensure one Drive sub-folder per game.
-- `pipeline.rs` — orchestrates compress→upload with bounded concurrency.
-- `manifest.rs` — load/save per-file state (`pending → compressed → uploaded`),
+- `compress.rs` — orchestrates encode with bounded concurrency (`--jobs`).
+- `manifest.rs` — load/save per-file state (`pending → compressed`),
   the single source of truth for resume.
 
 ## Reference encode commands
@@ -88,7 +82,7 @@ omit the filter entirely — don't re-time clips that don't need it. When a
 - **Idempotent stages.** Never assume a clean start — 188 GB means crashes
   happen; re-running must only do the remaining work. Manifest is authoritative.
 - **Destructive ops are opt-in.** Deleting originals/compressed copies requires an
-  explicit flag *and* a verified upload. Default to keeping everything.
+  explicit flag. Default to keeping everything.
 - **Errors:** `anyhow` at the binary boundary, `thiserror` for library-style
   modules. Don't `unwrap()` on I/O, ffmpeg exit codes, or network calls.
 - **Logging:** `tracing`; user-facing progress via `indicatif`.
@@ -105,15 +99,7 @@ starts with a type prefix:
 - `docs:` — docs/comments only (README, CLAUDE.md)
 - `chore:` — build, deps, tooling, config
 
-Keep the subject imperative and concise, e.g. `feat: add resumable Drive upload`.
-
-## Secrets — never commit
-
-`.env` and a real `config.toml` are git-ignored. `.env` holds the Google OAuth
-client id/secret + refresh token (keys: `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `DRIVE_ROOT_FOLDER`). Commit
-`.env.example` and `config.example.toml` as templates only. Drive scope is
-`drive.file` (least privilege — app only touches files it creates).
+Keep the subject imperative and concise, e.g. `feat: add resumable compress`.
 
 ## Gotchas
 
@@ -137,8 +123,3 @@ client id/secret + refresh token (keys: `GOOGLE_CLIENT_ID`,
 - Validate ffmpeg child-process exit codes; a non-zero exit must NOT mark a file
   `compressed` in the manifest.
 - PowerShell path quoting: always quote paths with spaces (game names have them).
-- **Drive auth = OAuth as the user, not a service account.** Service accounts
-  can't write to a personal Drive (separate 0-quota storage), so we use the OAuth
-  user flow. Use the **loopback** redirect (`127.0.0.1`), not the copy-paste/OOB
-  flow — Google deprecated OOB in 2022. `auth` writes `GOOGLE_REFRESH_TOKEN` back
-  into `.env`; uploads are sequential and skip files already in the target folder.

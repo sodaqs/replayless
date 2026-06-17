@@ -140,14 +140,6 @@ impl ProgressSink for CliSink {
                             });
                         }
                     }
-                    Stage::Upload => {
-                        self.mp.suspend(|| {
-                            println!(
-                                "Upload: {ok} uploaded, {skipped} skipped, {failed} failed. {} sent.",
-                                human_size(in_bytes)
-                            )
-                        });
-                    }
                 }
             }
         }
@@ -162,7 +154,6 @@ fn short(key: &str) -> &str {
 fn stage_label(stage: Stage) -> &'static str {
     match stage {
         Stage::Compress => "Compress",
-        Stage::Upload => "Upload",
     }
 }
 

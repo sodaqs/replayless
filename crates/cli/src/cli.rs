@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-/// Compress NVIDIA replay videos with NVENC and upload them to Google Drive.
+/// Compress NVIDIA replay videos with NVENC.
 #[derive(Parser, Debug)]
 #[command(name = "video-uploader", version, about)]
 pub struct Cli {
@@ -24,21 +24,8 @@ pub enum Command {
     Scan,
     /// Transcode pending videos into the output dir (resumable).
     Compress(CompressArgs),
-    /// Authorize Google Drive access (writes the refresh token to .env).
-    Auth,
-    /// Upload compressed videos to Google Drive (resumable, resumable-safe).
-    Upload(UploadArgs),
-}
-
-#[derive(Args, Debug)]
-pub struct UploadArgs {
-    /// List what would be uploaded without sending anything.
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Only upload the first N pending files — handy for testing.
-    #[arg(long)]
-    pub limit: Option<usize>,
+    /// Check for ffmpeg/ffprobe and install them via winget if missing.
+    Setup,
 }
 
 #[derive(Args, Debug)]
@@ -74,4 +61,23 @@ pub struct CompressArgs {
     /// Only process the first N (largest) pending videos — handy for testing.
     #[arg(long)]
     pub limit: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_command_tree_is_valid() {
+        // clap's own lint: catches conflicting flags, bad arg defs, and that
+        // every subcommand (incl. `setup`) is wired up correctly.
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_setup_subcommand() {
+        let cli = Cli::parse_from(["video-uploader", "setup"]);
+        assert!(matches!(cli.command, Command::Setup));
+    }
 }

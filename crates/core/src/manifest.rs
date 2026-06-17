@@ -11,6 +11,8 @@ pub enum Status {
     #[default]
     Pending,
     Compressed,
+    /// Kept only for backward-compat when loading manifests written by older
+    /// versions; treated as `Compressed` in all logic.
     Uploaded,
 }
 
@@ -20,8 +22,6 @@ pub struct Entry {
     pub source_bytes: u64,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub output_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub drive_id: Option<String>,
 }
 
 /// The resumable state for the whole library, keyed by source path.
@@ -65,19 +65,10 @@ impl Manifest {
             status: Status::Pending,
             source_bytes,
             output_bytes: None,
-            drive_id: None,
         });
         entry.status = Status::Compressed;
         entry.source_bytes = source_bytes;
         entry.output_bytes = Some(output_bytes);
-    }
-
-    /// Record a successful upload (no-op if the key isn't tracked yet).
-    pub fn mark_uploaded(&mut self, key: &str, drive_id: &str) {
-        if let Some(entry) = self.entries.get_mut(key) {
-            entry.status = Status::Uploaded;
-            entry.drive_id = Some(drive_id.to_string());
-        }
     }
 }
 
@@ -107,28 +98,13 @@ mod tests {
     }
 
     #[test]
-    fn uploaded_counts_as_compressed_for_skip() {
+    fn uploaded_status_counts_as_compressed_for_skip() {
+        // Manifests written by older builds may still have "uploaded" entries;
+        // those should still be skipped during re-compress.
         let mut m = Manifest::default();
         m.mark_compressed("k", 1, 1);
         m.entries.get_mut("k").unwrap().status = Status::Uploaded;
-        assert!(m.is_compressed("k")); // already past compression -> skip re-encode
-    }
-
-    #[test]
-    fn mark_uploaded_sets_status_and_drive_id() {
-        let mut m = Manifest::default();
-        m.mark_compressed("k", 10, 2);
-        assert_ne!(m.entries["k"].status, Status::Uploaded);
-        m.mark_uploaded("k", "drive-abc");
-        assert_eq!(m.entries["k"].status, Status::Uploaded);
-        assert_eq!(m.entries["k"].drive_id.as_deref(), Some("drive-abc"));
-    }
-
-    #[test]
-    fn mark_uploaded_is_noop_for_unknown_key() {
-        let mut m = Manifest::default();
-        m.mark_uploaded("missing", "x");
-        assert!(!m.entries.contains_key("missing"));
+        assert!(m.is_compressed("k"));
     }
 
     #[test]

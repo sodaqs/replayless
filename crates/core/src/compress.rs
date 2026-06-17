@@ -175,7 +175,6 @@ pub fn run(
                                 stage: Stage::Compress,
                                 key: job.label.clone(),
                                 out_bytes: Some(out_sz),
-                                drive_id: None,
                             });
                         }
                         Ok(EncodeResult::Cancelled) => break,

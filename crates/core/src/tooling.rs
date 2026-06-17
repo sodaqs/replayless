@@ -63,6 +63,27 @@ fn winget_install_args() -> Vec<String> {
     .collect()
 }
 
+/// Whether ffmpeg must be installed before compression can run.
+fn needs_install(status: ToolStatus) -> bool {
+    matches!(status, ToolStatus::Missing)
+}
+
+/// Ensure ffmpeg/ffprobe are usable: a no-op when they're already on `PATH`,
+/// otherwise install them via winget (see [`install_ffmpeg`]). Returns the
+/// resolved [`ToolStatus`] — callers should treat [`ToolStatus::Missing`] as
+/// "still unusable" (e.g. the user dismissed the UAC prompt or winget failed)
+/// and surface a manual-install fallback.
+pub fn ensure_ffmpeg(sink: &mut dyn ProgressSink) -> Result<ToolStatus> {
+    let status = ffmpeg_status();
+    if !needs_install(status) {
+        return Ok(status);
+    }
+    sink.emit(Event::Log {
+        message: "ffmpeg/ffprobe not found on PATH.".to_string(),
+    });
+    install_ffmpeg(sink)
+}
+
 /// Install ffmpeg via winget, streaming output to `sink` as log events. Returns
 /// the [`ToolStatus`] re-checked after the attempt.
 ///
@@ -104,6 +125,12 @@ mod tests {
         assert_eq!(status_from(true, false), ToolStatus::Missing);
         assert_eq!(status_from(false, true), ToolStatus::Missing);
         assert_eq!(status_from(false, false), ToolStatus::Missing);
+    }
+
+    #[test]
+    fn needs_install_only_when_missing() {
+        assert!(needs_install(ToolStatus::Missing));
+        assert!(!needs_install(ToolStatus::Ready));
     }
 
     #[test]

@@ -1,37 +1,37 @@
 mod cli;
 mod ui;
 
-use std::path::Path;
-
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Parser;
 
 use crate::cli::{Cli, Command};
 use vu_core::config::Config;
-use vu_core::progress::CancelToken;
+use vu_core::progress::{CancelToken, ProgressSink};
+use vu_core::tooling::{self, ToolStatus};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    // Load .env into the process environment (Drive auth lives there).
-    let _ = dotenvy::dotenv();
-
-    let cfg = Config::load(cli.config.as_deref())?;
-
     match cli.command {
-        Command::Scan => vu_core::scan::run(&cfg)?,
-        Command::Auth => vu_drive::auth::run(Path::new(".env"))?,
-        Command::Upload(args) => {
-            let opts = vu_drive::Options {
-                dry_run: args.dry_run,
-                limit: args.limit,
-            };
+        Command::Setup => {
             let mut sink = ui::CliSink::new();
-            let cancel = CancelToken::new();
-            vu_drive::run(&cfg, &opts, &mut sink, &cancel)?;
+            ensure_ffmpeg_ready(&mut sink)?;
+            println!("ffmpeg is ready.");
+        }
+        Command::Scan => {
+            let cfg = Config::load(cli.config.as_deref())?;
+            vu_core::scan::run(&cfg)?;
         }
         Command::Compress(args) => {
+            let cfg = Config::load(cli.config.as_deref())?;
+            let mut sink = ui::CliSink::new();
+            // Pre-flight: compression shells out to ffmpeg, so make sure it's
+            // present first — installing it via winget when it isn't. A dry run
+            // only prints the planned commands, so keep it side-effect-free.
+            if !args.dry_run {
+                ensure_ffmpeg_ready(&mut sink)?;
+            }
             let overrides = vu_core::compress::Overrides {
                 codec: args.codec,
                 cq: args.cq,
@@ -42,10 +42,25 @@ fn main() -> Result<()> {
                 dry_run: args.dry_run,
                 limit: args.limit,
             };
-            let mut sink = ui::CliSink::new();
             let cancel = CancelToken::new();
             vu_core::compress::run(&cfg, &overrides, &mut sink, &cancel)?;
         }
+    }
+    Ok(())
+}
+
+/// Ensure ffmpeg/ffprobe are usable, installing them via winget if missing.
+/// Errors with actionable guidance when they're still unavailable afterward, so
+/// we never start a doomed compress run.
+fn ensure_ffmpeg_ready(sink: &mut dyn ProgressSink) -> Result<()> {
+    if tooling::ensure_ffmpeg(sink)? == ToolStatus::Missing {
+        bail!(
+            "ffmpeg/ffprobe are required but were not found and could not be \
+             installed automatically.\n\
+             Install them manually with:\n    \
+             winget install --id Gyan.FFmpeg -e\n\
+             then re-run."
+        );
     }
     Ok(())
 }
