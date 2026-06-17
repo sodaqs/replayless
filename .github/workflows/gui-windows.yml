@@ -1,0 +1,75 @@
+name: GUI (Windows)
+
+# Build + CI for the `replayless-gui` crate only, on Windows only.
+# Produces a single self-contained .exe (the icon is embedded via build.rs) —
+# no installer, no extra files to ship alongside it.
+
+on:
+  push:
+    branches: [master]
+    # Only run when the GUI (or what it builds on) actually changes.
+    # Version tags are handled by release.yml, not here.
+    paths:
+      - "crates/gui/**"
+      - "crates/core/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/gui-windows.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "crates/gui/**"
+      - "crates/core/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/gui-windows.yml"
+  workflow_dispatch:
+
+# Cancel an in-flight run when a newer commit is pushed to the same ref.
+concurrency:
+  group: gui-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  PACKAGE: replayless-gui
+
+jobs:
+  ci:
+    name: Build & CI
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable, MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          # gpui is a heavy dependency tree — key the cache to the GUI job.
+          key: gui-windows
+
+      - name: Format check
+        run: cargo fmt -p ${{ env.PACKAGE }} --check
+
+      - name: Clippy
+        run: cargo clippy -p ${{ env.PACKAGE }} --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test -p ${{ env.PACKAGE }}
+
+      - name: Build release exe
+        run: cargo build -p ${{ env.PACKAGE }} --release --target x86_64-pc-windows-msvc
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: replayless-gui
+          path: target/x86_64-pc-windows-msvc/release/replayless-gui.exe
+          if-no-files-found: error
