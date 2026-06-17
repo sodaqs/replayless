@@ -34,6 +34,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # git-cliff needs the full history + tags to build the changelog.
+          fetch-depth: 0
 
       - name: Determine tag
         id: tag
@@ -41,8 +44,13 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            # The dispatched tag may not exist in git yet, so render the
+            # pending (unreleased) commits under that version.
+            echo "cliff_args=--unreleased --tag ${{ inputs.tag }} --strip header" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            # Tag already exists on this commit — render its section.
+            echo "cliff_args=--latest --strip header" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install Rust (stable, MSVC)
@@ -65,11 +73,20 @@ jobs:
           cp "target/x86_64-pc-windows-msvc/release/replayless-gui.exe" \
              "dist/replayless-gui-${{ steps.tag.outputs.tag }}.exe"
 
+      - name: Render release notes
+        id: cliff
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: ${{ steps.tag.outputs.cliff_args }}
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
-          generate_release_notes: true
+          # Use git-cliff's categorized notes instead of GitHub's PR-based ones.
+          body: ${{ steps.cliff.outputs.content }}
+          generate_release_notes: false
           files: dist/replayless-gui-${{ steps.tag.outputs.tag }}.exe
           fail_on_unmatched_files: true

@@ -1,0 +1,56 @@
+# git-cliff configuration — generates CHANGELOG.md and GitHub Release notes
+# from Conventional Commits. See https://git-cliff.org/docs/configuration
+
+[changelog]
+# Rendered once at the top of CHANGELOG.md (stripped out of release-page notes
+# via `--strip header` in CI, so the release body has no redundant title).
+header = """
+# Changelog
+
+All notable changes to Replayless are documented here.
+
+Format follows [Keep a Changelog](https://keepachangelog.com/) and the entries
+are generated from [Conventional Commits](https://www.conventionalcommits.org/).
+
+"""
+
+# One section per release. `version` is unset for unreleased commits, so those
+# land under an [Unreleased] heading until they're cut into a tag.
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }})\
+{% endfor %}
+{% endfor %}\n
+"""
+trim = true
+
+[git]
+# Only parse Conventional Commits, and drop anything that isn't one.
+conventional_commits = true
+filter_unconventional = true
+# Tags that mark a release. Matches v0.1.0, v1.2.3, etc.
+tag_pattern = "v[0-9]*"
+# Sort commits oldest-first within each release section.
+sort_commits = "oldest"
+
+# Map commit type -> changelog section. Order here is display order.
+commit_parsers = [
+  { message = "^feat",          group = "Features" },
+  { message = "^fix",           group = "Fixes" },
+  { message = "^perf",          group = "Performance" },
+  { message = "^refactor",      group = "Refactor" },
+  { message = "^docs",          group = "Documentation" },
+  { message = "^test",          group = "Testing" },
+  # Dependency bumps are noise in a user-facing changelog.
+  { message = "^chore\\(deps",  skip = true },
+  { message = "^chore",         group = "Chores" },
+  # Anything else conventional-but-unmapped still shows up.
+  { message = ".*",             group = "Other" },
+]

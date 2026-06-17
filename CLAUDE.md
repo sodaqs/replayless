@@ -104,6 +104,27 @@ Keep the subject imperative and concise, e.g. `feat: add resumable compress`.
 **Before every commit, run `cargo clippy --all-targets` and `cargo fmt` (and
 `cargo test`) — a commit must be clippy-clean and formatted.**
 
+## Releases
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the
+`replayless-gui.exe` and publishes a GitHub Release. The release notes are
+generated from Conventional Commits by **git-cliff** (config: `cliff.toml`), so
+the changelog is only as good as the commit messages.
+
+`CHANGELOG.md` is tracked in the repo and regenerated locally *before* tagging,
+so the tag itself contains the changelog. The release ritual (PowerShell):
+
+```powershell
+cargo install git-cliff --locked        # one-time, if not already installed
+git cliff -o CHANGELOG.md                # regenerate from commits
+git commit -am "docs: update changelog for v0.1.0"
+# keep crates/gui/Cargo.toml version in sync with the tag, then:
+git tag v0.1.0
+git push --follow-tags                   # triggers the release workflow
+```
+
+`git cliff --bumped-version` suggests the next semver tag from your commits.
+
 ## Gotchas
 
 - **GPU decode is broken here.** `-hwaccel cuda` fails on this RTX 5070 / ffmpeg
