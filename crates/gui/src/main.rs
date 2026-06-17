@@ -1,3 +1,7 @@
+// Don't pop a console window behind the GUI on Windows release builds. Debug
+// builds keep the console so `tracing` output stays visible while developing.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod features;
 mod shared;
