@@ -16,3 +16,8 @@ vu-core = { path = "../core" }
 vu-drive = { path = "../drive" }
 anyhow = "1"
 futures = "0.3"
+
+# Embeds the application icon into the .exe on Windows (see build.rs). Keeps the
+# build a single self-contained executable — the icon ships inside the binary.
+[build-dependencies]
+winresource = "0.1"
