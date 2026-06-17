@@ -53,6 +53,11 @@ are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 - Generate release changelog with git-cliff (c029509)
 - Trim release notes to features/fixes and publish as replayless.exe (90da35c)
 
+### Other
+
+- Generate release changelog with git-cliff (c029509)
+- Trim release notes to features/fixes and publish as replayless.exe (90da35c)
+
 ### Refactor
 
 - Extract Google Drive integration into a vu-drive crate (93ea6b7)
