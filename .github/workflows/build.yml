@@ -1,4 +1,4 @@
-name: GUI (Windows)
+name: Build
 
 # Build + CI for the `replayless-gui` crate only, on Windows only.
 # Produces a single self-contained .exe (the icon is embedded via build.rs) —
@@ -14,7 +14,7 @@ on:
       - "crates/core/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - ".github/workflows/gui-windows.yml"
+      - ".github/workflows/build.yml"
   pull_request:
     branches: [master]
     paths:
@@ -22,12 +22,12 @@ on:
       - "crates/core/**"
       - "Cargo.toml"
       - "Cargo.lock"
-      - ".github/workflows/gui-windows.yml"
+      - ".github/workflows/build.yml"
   workflow_dispatch:
 
 # Cancel an in-flight run when a newer commit is pushed to the same ref.
 concurrency:
-  group: gui-windows-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 env:
