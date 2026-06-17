@@ -1,12 +1,13 @@
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::thread;
 
 use anyhow::{Context, Result, bail};
 
 use crate::config::EncodeConfig;
 use crate::probe::MediaInfo;
+use crate::proc::command;
 use crate::progress::CancelToken;
 
 /// Build the ffmpeg argument list (everything after `ffmpeg`, excluding the
@@ -130,7 +131,7 @@ pub fn run_with_progress(
     cancel: &CancelToken,
     mut on_progress: impl FnMut(EncodeProgress),
 ) -> Result<RunOutcome> {
-    let mut child = Command::new("ffmpeg")
+    let mut child = command("ffmpeg")
         .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-nostats"])
         .args(["-progress", "pipe:1"])
         .args(args)

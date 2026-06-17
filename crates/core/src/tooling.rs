@@ -1,9 +1,11 @@
 //! External-tool detection and installation: ensure `ffmpeg`/`ffprobe` are
 //! present, and install them via `winget` on Windows when they're not.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use anyhow::{Context, Result};
+
+use crate::proc::command;
 
 use crate::progress::{Event, ProgressSink};
 
@@ -36,7 +38,7 @@ fn status_from(ffmpeg_ok: bool, ffprobe_ok: bool) -> ToolStatus {
 
 /// True if `<tool> -version` launches and exits successfully.
 fn tool_runs(tool: &str) -> bool {
-    Command::new(tool)
+    command(tool)
         .arg("-version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -93,7 +95,7 @@ pub fn install_ffmpeg(sink: &mut dyn ProgressSink) -> Result<ToolStatus> {
     sink.emit(Event::Log {
         message: format!("Installing ffmpeg via winget ({FFMPEG_WINGET_ID})…"),
     });
-    let output = Command::new("winget")
+    let output = command("winget")
         .args(winget_install_args())
         .output()
         .context("launching winget (is it installed?)")?;

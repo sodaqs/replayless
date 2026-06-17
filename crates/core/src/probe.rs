@@ -1,7 +1,8 @@
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+
+use crate::proc::command;
 
 /// Basic stream/format info we need to build an encode command.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -14,7 +15,7 @@ pub struct MediaInfo {
 
 /// Probe a video with `ffprobe` for duration, frame rate, and dimensions.
 pub fn probe(path: &Path) -> Result<MediaInfo> {
-    let out = Command::new("ffprobe")
+    let out = command("ffprobe")
         .args([
             "-v",
             "error",
