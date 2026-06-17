@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use vu_core::config::Config;
+use replayless_core::config::Config;
 
 /// Identifies which folder a folder-picker session is choosing.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub fn compute_preflight(source: &Path) -> Option<Preflight> {
         source_dir: source.to_path_buf(),
         ..Config::default()
     };
-    let videos = vu_core::scan::collect_videos(&cfg).ok()?;
+    let videos = replayless_core::scan::collect_videos(&cfg).ok()?;
     let bytes_now = videos.iter().map(|v| v.bytes).sum();
     Some(Preflight {
         files: videos.len(),

@@ -2,7 +2,10 @@ mod app;
 mod features;
 mod shared;
 
-use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px, rgb, size};
+use gpui::{
+    App, AppContext, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, rgb,
+    size,
+};
 use gpui_component::{Root, Theme, TitleBar};
 
 fn main() {
@@ -25,7 +28,14 @@ fn main() {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(800.0), px(800.0))),
-                titlebar: Some(TitleBar::title_bar_options()),
+                // The component's options leave `title` as `None`, so the window
+                // had no native title — nothing showed in the taskbar tooltip or
+                // Alt+Tab. Set it here; the visible in-client caption is still
+                // drawn by our custom `WindowTitleBar`.
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Replayless".into()),
+                    ..TitleBar::title_bar_options()
+                }),
                 ..Default::default()
             };
 
@@ -43,7 +53,7 @@ fn main() {
 mod tests {
     use crate::features::progress::model::{RunState, fmt_eta};
     use crate::features::settings::Quality;
-    use vu_core::progress::{CancelToken, Event, Stage};
+    use replayless_core::progress::{CancelToken, Event, Stage};
 
     #[test]
     fn quality_presets_map_to_cq_and_maxrate() {

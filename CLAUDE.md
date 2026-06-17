@@ -28,9 +28,9 @@ The workspace has two binaries (CLI + GUI), so `cargo run` needs `--bin`:
 
 ```powershell
 cargo build                                   # build
-cargo run --bin video-uploader -- scan        # list source videos + totals (read-only)
-cargo run --bin video-uploader -- setup       # ensure ffmpeg (winget-installs if missing)
-cargo run --bin video-uploader -- compress    # transcode pending (auto-ensures ffmpeg first)
+cargo run --bin replayless -- scan        # list source videos + totals (read-only)
+cargo run --bin replayless -- setup       # ensure ffmpeg (winget-installs if missing)
+cargo run --bin replayless -- compress    # transcode pending (auto-ensures ffmpeg first)
 cargo test
 cargo clippy --all-targets
 cargo fmt
@@ -100,6 +100,9 @@ starts with a type prefix:
 - `chore:` — build, deps, tooling, config
 
 Keep the subject imperative and concise, e.g. `feat: add resumable compress`.
+
+**Before every commit, run `cargo clippy --all-targets` and `cargo fmt` (and
+`cargo test`) — a commit must be clippy-clean and formatted.**
 
 ## Gotchas
 

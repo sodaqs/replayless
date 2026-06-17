@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 use futures::channel::mpsc::UnboundedSender;
-use vu_core::compress;
-use vu_core::progress::{CancelToken, Event, ProgressSink, Stage};
-use vu_core::scan::human_size;
+use replayless_core::compress;
+use replayless_core::progress::{CancelToken, Event, ProgressSink, Stage};
+use replayless_core::scan::human_size;
 
 pub struct RunState {
     pub cancel: CancelToken,

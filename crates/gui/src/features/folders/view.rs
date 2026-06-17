@@ -4,7 +4,7 @@ use gpui::{
     App, Entity, Hsla, IntoElement, ParentElement, PathPromptOptions, SharedString, Styled, div, px,
 };
 use gpui_component::{Sizable, button::Button, h_flex};
-use vu_core::scan::human_size;
+use replayless_core::scan::human_size;
 
 use crate::app::AppView;
 use crate::shared::components::stat::stat_chip;

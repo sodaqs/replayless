@@ -1,4 +1,4 @@
-# video-uploader
+# Replayless
 
 A Rust CLI + GUI that takes the NVIDIA ShadowPlay/Instant-Replay recordings in
 `C:\Users\<you>\Videos\NVIDIA`, **re-encodes them into compact versions** with
@@ -122,7 +122,7 @@ clips halve their frames for extra savings); clips already ≤30 fps skip the fi
 ## CLI design
 
 ```
-video-uploader <command> [options]
+replayless <command> [options]
 
 Commands:
   scan                 List source videos grouped by game; print totals. No changes.
@@ -191,7 +191,7 @@ libav.
 ```
 Cargo.toml                 # [workspace] members = core, cli, gui
 crates/
-  core/   (lib "vu_core")  # UI-agnostic logic — no clap, no gpui
+  core/   (lib "replayless_core")  # UI-agnostic logic — no clap, no gpui
     src/
       lib.rs               # pub module surface
       config.rs            # load/validate config.toml            [done]
@@ -202,12 +202,12 @@ crates/
       compress.rs          # orchestrate compress, --jobs, temp→rename [done]
       tooling.rs           # ffmpeg/ffprobe detection + winget install  [done]
       progress.rs          # Event / ProgressSink / CancelToken        [done]
-  cli/    (bin "video-uploader")
+  cli/    (bin "replayless")
     src/
       main.rs              # clap dispatch -> core                 [done]
       cli.rs               # clap definitions                       [done]
       ui.rs                # indicatif ProgressSink for the CLI      [done]
-  gui/    (bin "video-uploader-gui") # gpui app -> core (channel sink)
+  gui/    (bin "replayless-gui") # gpui app -> core (channel sink)
 ```
 
 ---
@@ -236,7 +236,7 @@ over the same core**, not a rewrite.
 ### Architecture: workspace with a shared core
 
 ```
-video-uploader/                # workspace root
+replayless/                    # workspace root
   Cargo.toml                   # [workspace] members = ["crates/*"]
   crates/
     core/                      # compress logic — no UI, no clap, no gpui
@@ -260,7 +260,7 @@ video-uploader/                # workspace root
 - After install, **re-resolve** ffmpeg without an app restart.
 
 Both front-ends use this: the GUI shows a status badge + "Install ffmpeg" button,
-and the CLI exposes `video-uploader setup` plus an automatic pre-flight before
+and the CLI exposes `replayless setup` plus an automatic pre-flight before
 `compress` (skipped for `--dry-run`) that installs ffmpeg if it's missing and
 aborts with manual-install guidance if it still isn't usable.
 
@@ -281,7 +281,7 @@ let cancel = state.cancel.clone();
 
 std::thread::spawn(move || {
     let mut sink = ChannelSink(tx);
-    vu_core::compress::run(&cfg, &ov, &mut sink, &cancel);
+    replayless_core::compress::run(&cfg, &ov, &mut sink, &cancel);
 });
 
 cx.spawn(async move |cx| {

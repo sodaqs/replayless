@@ -5,9 +5,9 @@ use anyhow::{Result, bail};
 use clap::Parser;
 
 use crate::cli::{Cli, Command};
-use vu_core::config::Config;
-use vu_core::progress::{CancelToken, ProgressSink};
-use vu_core::tooling::{self, ToolStatus};
+use replayless_core::config::Config;
+use replayless_core::progress::{CancelToken, ProgressSink};
+use replayless_core::tooling::{self, ToolStatus};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -21,7 +21,7 @@ fn main() -> Result<()> {
         }
         Command::Scan => {
             let cfg = Config::load(cli.config.as_deref())?;
-            vu_core::scan::run(&cfg)?;
+            replayless_core::scan::run(&cfg)?;
         }
         Command::Compress(args) => {
             let cfg = Config::load(cli.config.as_deref())?;
@@ -32,7 +32,7 @@ fn main() -> Result<()> {
             if !args.dry_run {
                 ensure_ffmpeg_ready(&mut sink)?;
             }
-            let overrides = vu_core::compress::Overrides {
+            let overrides = replayless_core::compress::Overrides {
                 codec: args.codec,
                 cq: args.cq,
                 maxrate: args.maxrate,
@@ -43,7 +43,7 @@ fn main() -> Result<()> {
                 limit: args.limit,
             };
             let cancel = CancelToken::new();
-            vu_core::compress::run(&cfg, &overrides, &mut sink, &cancel)?;
+            replayless_core::compress::run(&cfg, &overrides, &mut sink, &cancel)?;
         }
     }
     Ok(())

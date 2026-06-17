@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand};
 
 /// Compress NVIDIA replay videos with NVENC.
 #[derive(Parser, Debug)]
-#[command(name = "video-uploader", version, about)]
+#[command(name = "replayless", version, about)]
 pub struct Cli {
     /// Config file to load (default: ./config.toml if present, else built-in defaults).
     #[arg(long, global = true, value_name = "PATH")]
@@ -77,7 +77,7 @@ mod tests {
 
     #[test]
     fn parses_setup_subcommand() {
-        let cli = Cli::parse_from(["video-uploader", "setup"]);
+        let cli = Cli::parse_from(["replayless", "setup"]);
         assert!(matches!(cli.command, Command::Setup));
     }
 }

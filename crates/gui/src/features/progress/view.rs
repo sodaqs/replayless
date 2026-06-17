@@ -1,7 +1,7 @@
 use gpui::{FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled, div, px};
 use gpui_component::{h_flex, progress::Progress, v_flex};
-use vu_core::progress::Stage;
-use vu_core::scan::human_size;
+use replayless_core::progress::Stage;
+use replayless_core::scan::human_size;
 
 use crate::shared::components::stat::stat_chip;
 

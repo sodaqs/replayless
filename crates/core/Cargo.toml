@@ -1,11 +1,11 @@
 [package]
-name = "vu-core"
+name = "replayless-core"
 version = "0.1.0"
 edition = "2024"
 
 # UI-agnostic core: scan, compress (NVENC), manifest, progress/cancel.
 # No clap, no gpui, no HTTP — front-ends depend on this. Drive upload (and its
-# reqwest/OAuth dependency surface) lives in the sibling `vu-drive` crate.
+# reqwest/OAuth dependency surface) lives in the sibling `replayless-drive` crate.
 [dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

@@ -1,8 +1,8 @@
-# vu-core
+# replayless-core
 
-The **UI-agnostic core** of video-uploader: scan the NVIDIA replay library,
+The **UI-agnostic core** of Replayless: scan the NVIDIA replay library,
 compress clips with the GPU (NVENC), track resumable state in a manifest, and
-report progress. Every front-end — the [`video-uploader` CLI](../cli) and the
+report progress. Every front-end — the [`replayless` CLI](../cli) and the
 [gpui desktop GUI](../gui) — depends on this crate and drives it.
 
 > No `clap`, no `gpui`, no HTTP. This crate is pure logic plus subprocess calls
@@ -111,6 +111,6 @@ dirs. Library modules use `anyhow`/`thiserror` and never `unwrap()` on I/O or
 ffmpeg exit codes.
 
 ```powershell
-cargo test -p vu-core
-cargo clippy -p vu-core --all-targets
+cargo test -p replayless-core
+cargo clippy -p replayless-core --all-targets
 ```

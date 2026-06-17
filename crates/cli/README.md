@@ -1,12 +1,12 @@
-# video-uploader (CLI)
+# replayless (CLI)
 
 The command-line front-end for the compress pipeline: a thin `clap` binary that
-loads config, renders progress with `indicatif`, and drives [`vu-core`](../core).
+loads config, renders progress with `indicatif`, and drives [`replayless-core`](../core).
 All real work lives in the core — this crate is argument parsing plus terminal
 rendering.
 
-Binary name: **`video-uploader`**. The workspace also builds
-`video-uploader-gui`, so `cargo run` needs an explicit `--bin`.
+Binary name: **`replayless`**. The workspace also builds
+`replayless-gui`, so `cargo run` needs an explicit `--bin`.
 
 ## Commands
 
@@ -17,10 +17,10 @@ Binary name: **`video-uploader`**. The workspace also builds
 | `setup` | Check for `ffmpeg`/`ffprobe`; install via `winget` (`Gyan.FFmpeg`) if missing. |
 
 ```powershell
-cargo run --bin video-uploader -- scan
-cargo run --bin video-uploader -- setup
-cargo run --bin video-uploader -- compress --jobs 1
-cargo run --bin video-uploader -- compress --dry-run --limit 3
+cargo run --bin replayless -- scan
+cargo run --bin replayless -- setup
+cargo run --bin replayless -- compress --jobs 1
+cargo run --bin replayless -- compress --dry-run --limit 3
 ```
 
 ## Options
@@ -86,13 +86,13 @@ jobs = 2
 
 ## Dependencies
 
-`vu-core` (all logic), `clap` (parsing), `indicatif` (progress bars),
+`replayless-core` (all logic), `clap` (parsing), `indicatif` (progress bars),
 `anyhow` (errors), `tracing` + `tracing-subscriber` (logging).
 
 ## Testing
 
 ```powershell
-cargo test -p video-uploader
+cargo test -p replayless
 ```
 
 `cli.rs` runs clap's own `debug_assert()` lint over the whole command tree;

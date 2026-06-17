@@ -7,10 +7,10 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
-use vu_core::compress::{self, Overrides};
-use vu_core::config::{Config, EncodeConfig};
-use vu_core::progress::{CancelToken, Event, NullSink, ProgressSink};
-use vu_core::tooling::{self, ToolStatus};
+use replayless_core::compress::{self, Overrides};
+use replayless_core::config::{Config, EncodeConfig};
+use replayless_core::progress::{CancelToken, Event, NullSink, ProgressSink};
+use replayless_core::tooling::{self, ToolStatus};
 
 use crate::features::folders::view::{folder_row, preflight_strip};
 use crate::features::folders::{Preflight, Target, compute_preflight};
@@ -294,7 +294,7 @@ pub fn start_run(view: &Entity<AppView>, cx: &mut App) {
         c.notify();
     });
 
-    let manifest = output.join(".video-uploader").join("manifest.json");
+    let manifest = output.join(".replayless").join("manifest.json");
     if let Some(dir) = manifest.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

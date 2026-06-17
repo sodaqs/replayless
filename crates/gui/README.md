@@ -1,4 +1,4 @@
-# video-uploader-gui
+# replayless-gui
 
 Desktop GUI for Replayless, built with [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's UI framework) and [gpui-component](https://github.com/longbridgeapp/gpui-component).
 

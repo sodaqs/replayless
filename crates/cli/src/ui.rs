@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use vu_core::compress::ratio;
-use vu_core::progress::{Event, ProgressSink, Stage};
-use vu_core::scan::human_size;
+use replayless_core::compress::ratio;
+use replayless_core::progress::{Event, ProgressSink, Stage};
+use replayless_core::scan::human_size;
 
 /// A per-file progress bar plus its fixed label prefix.
 struct FileBar {

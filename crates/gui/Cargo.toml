@@ -1,10 +1,10 @@
 [package]
-name = "video-uploader-gui"
+name = "replayless-gui"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "video-uploader-gui"
+name = "replayless-gui"
 path = "src/main.rs"
 
 # Pinned to crates.io releases (not the Zed monorepo git dep): gpui-component
@@ -15,7 +15,7 @@ gpui-component = "0.5.1"
 # Bundled Lucide icon SVGs (status badges + title-bar window controls), served
 # via our AssetSource in src/shared/assets.rs.
 gpui-component-assets = "0.5.1"
-vu-core = { path = "../core" }
+replayless-core = { path = "../core" }
 anyhow = "1"
 futures = "0.3"
 # Embeds the brand icon for the custom title bar into the binary.
