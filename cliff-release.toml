@@ -1,0 +1,45 @@
+# git-cliff config for GitHub Release notes ONLY (used by release.yml).
+#
+# This is the trimmed view: only the user-facing categories (Features, Fixes,
+# Performance) plus a link to the full CHANGELOG.md. The complete changelog —
+# every category, including docs/refactor/chore/test — lives in CHANGELOG.md,
+# generated locally from the full `cliff.toml`. Keep the two [git] sections in
+# sync if you change commit conventions.
+
+[changelog]
+# CI renders this with `--strip header`, so the header is dropped from the
+# published notes — leave it empty.
+header = ""
+
+# One trimmed section per release, ending with a link to the full changelog at
+# this tag. `version` is the tag (e.g. v0.1.0); CI always renders with a tag.
+body = """
+{% if version %}\
+## What's new in {{ version }}
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}
+---
+**Full changelog →** [`CHANGELOG.md`](https://github.com/sodaqs/replayless/blob/{{ version }}/CHANGELOG.md)
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+tag_pattern = "v[0-9]*"
+sort_commits = "oldest"
+
+# Only the important, user-facing types reach the Release page; everything else
+# is skipped here (but still recorded in the full CHANGELOG.md). Breaking
+# changes written as `feat!:` / `fix!:` naturally show under Features / Fixes.
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix",  group = "Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = ".*",    skip = true },
+]

@@ -66,18 +66,20 @@ jobs:
       - name: Build release exe
         run: cargo build -p ${{ env.PACKAGE }} --release --target x86_64-pc-windows-msvc
 
-      - name: Stage versioned exe
+      - name: Stage release exe
         shell: bash
         run: |
           mkdir -p dist
           cp "target/x86_64-pc-windows-msvc/release/replayless-gui.exe" \
-             "dist/replayless-gui-${{ steps.tag.outputs.tag }}.exe"
+             "dist/replayless.exe"
 
       - name: Render release notes
         id: cliff
         uses: orhun/git-cliff-action@v4
         with:
-          config: cliff.toml
+          # Trimmed view for the Release page (Features/Fixes/Perf + a link to
+          # the full CHANGELOG.md). The complete changelog uses cliff.toml.
+          config: cliff-release.toml
           args: ${{ steps.tag.outputs.cliff_args }}
 
       - name: Publish release
@@ -88,5 +90,5 @@ jobs:
           # Use git-cliff's categorized notes instead of GitHub's PR-based ones.
           body: ${{ steps.cliff.outputs.content }}
           generate_release_notes: false
-          files: dist/replayless-gui-${{ steps.tag.outputs.tag }}.exe
+          files: dist/replayless.exe
           fail_on_unmatched_files: true

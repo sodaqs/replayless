@@ -107,19 +107,24 @@ Keep the subject imperative and concise, e.g. `feat: add resumable compress`.
 ## Releases
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds the
-`replayless-gui.exe` and publishes a GitHub Release. The release notes are
-generated from Conventional Commits by **git-cliff** (config: `cliff.toml`), so
-the changelog is only as good as the commit messages.
+`replayless-gui.exe` and publishes a GitHub Release. Notes are generated from
+Conventional Commits by **git-cliff**, so the changelog is only as good as the
+commit messages. Two configs:
+
+- `cliff.toml` — the **full** changelog (every category). Drives `CHANGELOG.md`.
+- `cliff-release.toml` — the **trimmed** GitHub Release notes (Features/Fixes/
+  Performance only) plus a "Full changelog →" link to `CHANGELOG.md`. Used by
+  the release workflow. Keep its `[git]` parsers in sync with `cliff.toml`.
 
 `CHANGELOG.md` is tracked in the repo and regenerated locally *before* tagging,
 so the tag itself contains the changelog. The release ritual (PowerShell):
 
 ```powershell
-cargo install git-cliff --locked        # one-time, if not already installed
-git cliff -o CHANGELOG.md                # regenerate from commits
+cargo install git-cliff --locked         # one-time, if not already installed
+git cliff --tag v0.1.0 -o CHANGELOG.md   # --tag labels the new section [0.1.0]
 git commit -am "docs: update changelog for v0.1.0"
 # keep crates/gui/Cargo.toml version in sync with the tag, then:
-git tag v0.1.0
+git tag v0.1.0                           # tag the changelog commit
 git push --follow-tags                   # triggers the release workflow
 ```
 
