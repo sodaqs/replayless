@@ -5,7 +5,7 @@ All notable changes to Replayless are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/) and the entries
 are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 
-## [Unreleased]
+## [0.1.0] - 2026-06-17
 
 
 ### Chores
@@ -13,6 +13,7 @@ are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 - Add .env.example and move Drive config to .env (2fc367a)
 - Remove hard-coded username from paths (a5b8d65)
 - Add Windows CI and release workflows for GUI (96a5428)
+- Rename gui-windows workflow to build (ea7572d)
 
 ### Documentation
 
@@ -39,10 +40,16 @@ are generated from [Conventional Commits](https://www.conventionalcommits.org/).
 - Encode quality presets and jobs control (b3a6439)
 - Embed application icon in the Windows exe (a218d1f)
 - Modular GUI with custom title bar; remove Drive upload crate (3ccd58f)
+- Hide console window on release builds (90b2cc1)
 
 ### Fixes
 
 - Open the native OS folder dialog for Browse (64f3109)
+
+### Other
+
+- Generate release changelog with git-cliff (c029509)
+- Trim release notes to features/fixes and publish as replayless.exe (90da35c)
 
 ### Refactor
 
