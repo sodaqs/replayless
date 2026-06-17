@@ -25,7 +25,9 @@ use crate::shared::components::title_bar::WindowTitleBar;
 pub struct AppView {
     pub input_dir: Option<PathBuf>,
     pub output_dir: Option<PathBuf>,
-    pub ffmpeg: ToolStatus,
+    /// `None` while the availability check is still running (at startup or after
+    /// a Re-check); resolved off the UI thread by [`start_checks`].
+    pub ffmpeg: Option<ToolStatus>,
     pub quality: Quality,
     pub run: Option<RunState>,
     pub preflight: Option<Preflight>,
@@ -33,17 +35,19 @@ pub struct AppView {
 }
 
 impl AppView {
+    /// Build the view with no blocking work, so the window opens instantly.
+    /// The ffmpeg probe (subprocess) and the source-folder pre-flight (file
+    /// scan) are kicked off on background threads by [`start_checks`] and fill
+    /// in once ready.
     pub fn new() -> Self {
         let cfg = Config::default();
-        let input_dir = Some(cfg.source_dir);
-        let preflight = input_dir.as_deref().and_then(compute_preflight);
         Self {
-            input_dir,
+            input_dir: Some(cfg.source_dir),
             output_dir: Some(cfg.output_dir),
-            ffmpeg: tooling::ffmpeg_status(),
+            ffmpeg: None,
             quality: Quality::Balanced,
             run: None,
-            preflight,
+            preflight: None,
             installing: false,
         }
     }
@@ -58,11 +62,6 @@ impl AppView {
         }
     }
 
-    pub fn recheck_ffmpeg(&mut self, cx: &mut Context<Self>) {
-        self.ffmpeg = tooling::ffmpeg_status();
-        cx.notify();
-    }
-
     pub fn running(&self) -> bool {
         self.run.as_ref().is_some_and(|r| !r.finished)
     }
@@ -71,7 +70,7 @@ impl AppView {
         !self.running()
             && self.input_dir.is_some()
             && self.output_dir.is_some()
-            && self.ffmpeg == ToolStatus::Ready
+            && self.ffmpeg == Some(ToolStatus::Ready)
     }
 }
 
@@ -89,10 +88,14 @@ impl Render for AppView {
         let danger = theme.danger;
 
         // ── ffmpeg status badge ──────────────────────────────────────────────
+        // `None` = the check is still running; show a neutral, icon-less pill so
+        // we never flash a scary "not found" before the probe finishes.
         let (icon, badge_color, badge_text) = match self.ffmpeg {
-            ToolStatus::Ready => (IconName::CircleCheck, success, "ffmpeg ready"),
-            ToolStatus::Missing => (IconName::CircleX, danger, "ffmpeg not found"),
+            Some(ToolStatus::Ready) => (Some(IconName::CircleCheck), success, "ffmpeg ready"),
+            Some(ToolStatus::Missing) => (Some(IconName::CircleX), danger, "ffmpeg not found"),
+            None => (None, muted, "checking ffmpeg…"),
         };
+        let missing = self.ffmpeg == Some(ToolStatus::Missing);
         let ffmpeg_badge = h_flex()
             .gap_2()
             .items_center()
@@ -106,21 +109,19 @@ impl Render for AppView {
                     .border_1()
                     .border_color(badge_color.opacity(0.4))
                     .bg(badge_color.opacity(0.1))
-                    .child(Icon::new(icon).text_color(badge_color).small())
+                    .children(icon.map(|i| Icon::new(i).text_color(badge_color).small()))
                     .child(div().text_xs().text_color(badge_color).child(badge_text)),
             )
             // Re-check is only useful while ffmpeg is missing (e.g. after a
             // manual install); once it's ready there's nothing to re-check.
-            .children((self.ffmpeg == ToolStatus::Missing).then(|| {
+            .children(missing.then(|| {
                 let v_re = view.clone();
                 Button::new("recheck")
                     .label("Re-check")
                     .small()
-                    .on_click(move |_ev, _w, cx| {
-                        v_re.update(cx, |this, cx| this.recheck_ffmpeg(cx))
-                    })
+                    .on_click(move |_ev, _w, cx| spawn_ffmpeg_check(&v_re, cx))
             }))
-            .children(if self.ffmpeg == ToolStatus::Missing {
+            .children(if missing {
                 let v_inst = view.clone();
                 let installing = self.installing;
                 Some(
@@ -190,7 +191,7 @@ impl Render for AppView {
         });
 
         // ── ffmpeg warning ───────────────────────────────────────────────────
-        let ffmpeg_warn = (self.ffmpeg == ToolStatus::Missing).then(|| {
+        let ffmpeg_warn = missing.then(|| {
             div()
                 .text_xs()
                 .text_color(danger)
@@ -268,7 +269,60 @@ pub fn install_ffmpeg_action(view: &Entity<AppView>, cx: &mut App) {
         let _ = cx.update(|app| {
             view.update(app, |this, c| {
                 this.installing = false;
-                this.ffmpeg = status;
+                this.ffmpeg = Some(status);
+                c.notify();
+            });
+        });
+    })
+    .detach();
+}
+
+/// Kick off the startup probes — ffmpeg availability and the source-folder
+/// pre-flight — on background threads, so opening the window never blocks on
+/// subprocess or filesystem work. Call once, right after the view is created.
+pub fn start_checks(view: &Entity<AppView>, cx: &mut App) {
+    spawn_ffmpeg_check(view, cx);
+
+    let Some(source) = view.read(cx).input_dir.clone() else {
+        return;
+    };
+    let (tx, rx) = futures::channel::oneshot::channel::<Option<Preflight>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(compute_preflight(&source));
+    });
+    let view = view.clone();
+    cx.spawn(async move |cx| {
+        if let Ok(preflight) = rx.await {
+            let _ = cx.update(|app| {
+                view.update(app, |this, c| {
+                    this.preflight = preflight;
+                    c.notify();
+                });
+            });
+        }
+    })
+    .detach();
+}
+
+/// Resolve ffmpeg/ffprobe availability on a worker thread, then update the
+/// badge. Used at startup and by the Re-check button so the UI never blocks on
+/// the `-version` subprocess probes. Sets `ffmpeg = None` ("checking…") for the
+/// duration of the check.
+pub fn spawn_ffmpeg_check(view: &Entity<AppView>, cx: &mut App) {
+    view.update(cx, |this, c| {
+        this.ffmpeg = None;
+        c.notify();
+    });
+    let (tx, rx) = futures::channel::oneshot::channel::<ToolStatus>();
+    std::thread::spawn(move || {
+        let _ = tx.send(tooling::ffmpeg_status());
+    });
+    let view = view.clone();
+    cx.spawn(async move |cx| {
+        let status = rx.await.unwrap_or(ToolStatus::Missing);
+        let _ = cx.update(|app| {
+            view.update(app, |this, c| {
+                this.ffmpeg = Some(status);
                 c.notify();
             });
         });

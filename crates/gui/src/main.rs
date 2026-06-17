@@ -45,6 +45,9 @@ fn main() {
 
             cx.open_window(options, |window, cx| {
                 let view = cx.new(|_cx| app::AppView::new());
+                // Resolve ffmpeg status + pre-flight off-thread so the window
+                // appears immediately instead of blocking on subprocess probes.
+                app::start_checks(&view, cx);
                 cx.new(|cx| Root::new(view, window, cx))
             })
             .expect("failed to open window");
