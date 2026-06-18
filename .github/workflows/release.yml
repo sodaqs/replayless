@@ -73,14 +73,24 @@ jobs:
           cp "target/x86_64-pc-windows-msvc/release/replayless-gui.exe" \
              "dist/replayless.exe"
 
-      - name: Render release notes
-        id: cliff
-        uses: orhun/git-cliff-action@v4
+      - name: Install git-cliff
+        uses: taiki-e/install-action@v2
         with:
+          tool: git-cliff@2.13.1
+
+      - name: Render release notes
+        shell: bash
+        run: |
           # Trimmed view for the Release page (Features/Fixes/Perf + a link to
           # the full CHANGELOG.md). The complete changelog uses cliff.toml.
-          config: cliff-release.toml
-          args: ${{ steps.tag.outputs.cliff_args }}
+          #
+          # Write to a file and feed it via body_path below — NOT through a step
+          # output. The git-cliff action's $GITHUB_OUTPUT path mishandles the
+          # multiline body ("Matching delimiter not found 'EOF'"); a file avoids
+          # that entirely.
+          git-cliff --config cliff-release.toml ${{ steps.tag.outputs.cliff_args }} -o release-notes.md
+          echo "----- release notes -----"
+          cat release-notes.md
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -88,7 +98,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
           # Use git-cliff's categorized notes instead of GitHub's PR-based ones.
-          body: ${{ steps.cliff.outputs.content }}
+          body_path: release-notes.md
           generate_release_notes: false
           files: dist/replayless.exe
           fail_on_unmatched_files: true
