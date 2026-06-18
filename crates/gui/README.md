@@ -1,32 +1,116 @@
 # replayless-gui
 
-Desktop GUI for Replayless, built with [gpui](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's UI framework) and [gpui-component](https://github.com/longbridgeapp/gpui-component).
+Native desktop front-end for the **Replayless** compress pipeline, built on
+[gpui](https://github.com/zed-industries/zed) (Zed's GPU-accelerated UI
+framework) and [gpui-component](https://github.com/longbridge/gpui-component)
+(inputs, buttons, progress, tables, notifications, themes). The CLI stays fully
+usable — this is a **second front-end over the same [core](../core)**, not a
+rewrite.
+
+> Build a release exe: `cargo build -p replayless-gui --release`. The app icon is
+> embedded into the `.exe` (see [`build.rs`](build.rs)), so it ships as a single
+> self-contained executable. Release builds also run in the Windows GUI subsystem
+> — no console window flashes behind the app.
+
+## What it does (v1)
+
+- Pick **input** (source) and **output** folders via the native OS folder dialog.
+- **Readiness check** before Start: `ffmpeg` / `ffprobe` present, with a one-click
+  `winget` install if missing. The check runs off the UI thread, so the window
+  opens instantly and the badge fills in a beat later.
+- **Pre-flight summary** before anything runs: file count + **size now** +
+  **estimated size after** (+ ratio).
+- **Quality preset** — Balanced (`cq30`), Smaller (`cq32` + 8M cap), Higher (`cq28`).
+- **Jobs** — 1 or 2 concurrent NVENC sessions.
+- **Run** with a live **overall progress bar + ETA**, a per-file detail line, and a
+  **Cancel** button.
+
+## ffmpeg pre-flight + winget install
+
+Backed by [`core::tooling`](../core):
+
+- `ffmpeg_status()` → checks `ffmpeg -version` and `ffprobe -version` on `PATH`.
+- `install_ffmpeg(sink)` → runs `winget install --id Gyan.FFmpeg -e …`, streaming
+  output to the sink so the GUI shows live progress.
+- `ensure_ffmpeg(sink)` → check-then-install: a no-op when already on `PATH`,
+  otherwise installs via winget and returns the re-resolved status.
+
+After an install the status is **re-resolved without an app restart**. The GUI
+shows a status badge ("checking…" → ready/missing) plus an **Install ffmpeg**
+button; the CLI exposes the same via `replayless setup`.
+
+> Every external-tool spawn (ffmpeg, ffprobe, winget) goes through
+> `core::proc::command`, which sets `CREATE_NO_WINDOW` on Windows — so a
+> GUI-subsystem build never pops a console window during checks or encodes.
+
+## Size estimation (before / after)
+
+- **Size before** is free — the scan already has per-file sizes.
+- **Estimated size after** uses a stored average ratio (**187.6 GB → 28.9 GB ≈
+  6.5×** from the real run), refining per file as ffprobe durations come in.
+
+## Threading bridge
+
+The core stays **synchronous and thread-based** (no tokio). The GUI runs it on a
+background thread and marshals progress `Event`s onto gpui's executor:
+
+```rust
+let (tx, mut rx) = futures::channel::mpsc::unbounded::<Event>();
+let cancel = state.cancel.clone();
+
+std::thread::spawn(move || {
+    let mut sink = ChannelSink(tx);
+    replayless_core::compress::run(&cfg, &ov, &mut sink, &cancel);
+});
+
+cx.spawn(async move |cx| {
+    while let Some(ev) = rx.next().await {
+        // update UI on the foreground executor
+    }
+}).detach();
+```
+
+The same pattern drives the startup checks (ffmpeg + pre-flight) and the folder
+picker, so nothing blocking ever runs on the UI thread.
+
+## Crates used (GUI only — CLI/core stay lean)
+
+| Concern | Crate |
+|---|---|
+| UI framework | `gpui 0.2.2` (crates.io) |
+| Widgets + assets | `gpui-component 0.5.1` (crates.io) |
+| Channel to UI | `futures` mpsc |
+| Folder picker | native OS dialog via gpui `prompt_for_paths` (built-in) |
+| Embedded `.exe` icon | `winresource` (build dependency) |
 
 ## Folder structure
 
 ```
 crates/gui/
 ├── Cargo.toml
+├── build.rs                      # embeds assets/icon.ico into the .exe (Windows)
 └── src/
-    ├── main.rs                    # Entry point — Application::new().run(...)
-    ├── app.rs                     # AppView (root state + Render) + start_run + install_ffmpeg
+    ├── main.rs                   # Entry point — Application::new().run(...); start_checks()
+    ├── app.rs                    # AppView (root state + Render) + start_run + install_ffmpeg
     │
-    ├── shared/                    # Reusable widgets with no knowledge of business logic
+    ├── shared/                   # Reusable widgets with no knowledge of business logic
+    │   ├── assets.rs             # AssetSource — brand icon + gpui-component Lucide icons
     │   └── components/
-    │       ├── card.rs            # card() — bordered rounded container helper
-    │       └── stat.rs            # stat_chip() — label-above / value-below metric widget
+    │       ├── card.rs           # card() — bordered rounded container helper
+    │       ├── stat.rs           # stat_chip() — label-above / value-below metric widget
+    │       └── title_bar.rs      # custom Windows-style caption bar
     │
-    └── features/                  # Vertical slices by UI section
+    └── features/                 # Vertical slices by UI section
         ├── folders/
-        │   ├── mod.rs             # Target enum, Preflight struct, compute_preflight()
-        │   └── view.rs            # folder_row(), preflight_strip(), pick_folder()
+        │   ├── mod.rs            # Target enum, Preflight struct, compute_preflight()
+        │   └── view.rs           # folder_row(), preflight_strip(), pick_folder()
         ├── settings/
-        │   ├── mod.rs             # Mode enum, Quality enum (with cq/maxrate/est_ratio)
-        │   └── view.rs            # settings_panel() — Mode / Quality / Jobs selectors
+        │   ├── mod.rs            # Mode enum, Quality enum (with cq/maxrate/est_ratio)
+        │   └── view.rs           # settings_panel() — Mode / Quality / Jobs selectors
         └── progress/
             ├── mod.rs
-            ├── model.rs           # RunState, ChannelSink, basename(), fmt_eta()
-            └── view.rs            # run_panel() — progress bar + stats + current file + log
+            ├── model.rs          # RunState, ChannelSink, basename(), fmt_eta()
+            └── view.rs           # run_panel() — progress bar + stats + current file + log
 ```
 
 ### Organising principles
@@ -49,7 +133,7 @@ crates/gui/
 | `FluentBuilder::when(cond, \|b\| b.primary())` | Segmented-control active state |
 | `RenderOnce` components from gpui-component | `Progress`, `Button`, `Icon` |
 | Channel-based event loop (unbounded mpsc) | `start_run()` in `app.rs` |
-| `cx.spawn(async \|cx\| { ... }).detach()` | Foreground event drain + folder picker |
+| `cx.spawn(async \|cx\| { ... }).detach()` | Startup checks, foreground event drain, folder picker |
 
 ### Rendering helpers
 

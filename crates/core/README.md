@@ -62,7 +62,7 @@ pub trait ProgressSink: Send {
 There is no async runtime — the core is plain thread-based code. `compress::run`
 takes `&mut dyn ProgressSink` and `&CancelToken` and blocks until done, so a GUI
 runs it on a background thread and marshals events onto its own executor (see the
-bridge example in the root [README](../../README.md#background--threading-bridge)).
+bridge example in the [GUI README](../gui/README.md#threading-bridge)).
 
 ## Idempotency & resume
 
