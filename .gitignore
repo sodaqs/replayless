@@ -1,4 +1,5 @@
-/target
+# Cargo build output — match `target/` at any depth (root + nested IDE/flycheck dirs)
+target/
 
 # Secrets — Google OAuth client id/secret + refresh token (commit .env.example)
 .env
