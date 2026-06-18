@@ -166,4 +166,4 @@ CLI + GUI both work end-to-end; the compress pipeline is live-verified. See
 
 ## License
 
-Released under the [MIT License](LICENSE). © 2026 Vlad Korotkov.
+Released under the [MIT License](LICENSE). © 2026 sodaqs.
