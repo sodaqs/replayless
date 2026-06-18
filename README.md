@@ -11,6 +11,7 @@ GPU-fast HEVC re-encoding that shrinks gameplay clips **8–11×** with no perce
 [![Latest release](https://img.shields.io/github/v/release/sodaqs/replayless?display_name=tag&logo=github&label=release)](https://github.com/sodaqs/replayless/releases)
 ![Rust](https://img.shields.io/badge/Rust-2024-CE412B?logo=rust)
 ![Platform](https://img.shields.io/badge/Windows-x64-0078D6?logo=windows)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
 
@@ -163,22 +164,6 @@ CLI + GUI both work end-to-end; the compress pipeline is live-verified. See
 - [ ] Failed-file summary
 - [ ] Preferences persistence (last folders, preset)
 
-## Good to know
-
-- **HEVC is the default** — AV1 saves more but needs higher `cq` to compact and
-  has weaker old-device/preview playback.
-- **Use `--jobs 1` for full runs** — one NVENC stream already saturates the
-  encoder, so extra jobs add load without finishing faster.
-- **Destructive ops are opt-in** — deleting originals requires an explicit flag.
-
-## Built with
-
-[ffmpeg](https://ffmpeg.org) · [gpui](https://github.com/zed-industries/zed) +
-[gpui-component](https://github.com/longbridge/gpui-component) · `clap` · `serde`
-· `walkdir` · `indicatif` · `tracing`
-
 ## License
 
-No `LICENSE` file yet — until one is added, default copyright applies (all rights
-reserved). If you intend this to be open source, add a license (e.g. MIT or
-Apache-2.0).
+Released under the [MIT License](LICENSE). © 2026 Vlad Korotkov.
