@@ -29,8 +29,14 @@ fn quality_btn(view: &Entity<AppView>, quality: Quality, current: Quality) -> Bu
         .on_click(move |_ev, _w, cx| {
             v.update(cx, |this, c| {
                 this.quality = quality;
+                // The estimate is cq-dependent; drop the stale refined value so
+                // the strip shows the seeded ratio until re-refinement lands.
+                if let Some(pf) = this.preflight.as_mut() {
+                    pf.bytes_est = None;
+                }
                 c.notify();
-            })
+            });
+            crate::app::spawn_refine(&v, cx);
         })
 }
 

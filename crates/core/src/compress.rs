@@ -322,8 +322,10 @@ fn temp_path(dst: &Path) -> PathBuf {
     }
 }
 
-/// Stable, forward-slashed label relative to the source root.
-fn rel_label(source_dir: &Path, src: &Path) -> String {
+/// Stable, forward-slashed label relative to the source root. This is the
+/// manifest key for a source file; pre-flight estimation reuses it to match
+/// scanned videos against already-compressed manifest entries.
+pub fn rel_label(source_dir: &Path, src: &Path) -> String {
     src.strip_prefix(source_dir)
         .unwrap_or(src)
         .to_string_lossy()

@@ -13,7 +13,7 @@ use replayless_core::progress::{CancelToken, Event, NullSink, ProgressSink};
 use replayless_core::tooling::{self, ToolStatus};
 
 use crate::features::folders::view::{folder_row, preflight_strip};
-use crate::features::folders::{Preflight, Target, compute_preflight};
+use crate::features::folders::{Preflight, Target, compute_preflight, refine_preflight};
 use crate::features::progress::model::{ChannelSink, RunState};
 use crate::features::progress::view::run_panel;
 use crate::features::settings::Quality;
@@ -58,7 +58,15 @@ impl AppView {
                 self.preflight = compute_preflight(&path);
                 self.input_dir = Some(path);
             }
-            Target::Output => self.output_dir = Some(path),
+            Target::Output => {
+                self.output_dir = Some(path);
+                // A new output dir means a new manifest/cache → drop the stale
+                // refined estimate so the strip falls back to the seeded one
+                // until [`spawn_refine`] recomputes it.
+                if let Some(pf) = self.preflight.as_mut() {
+                    pf.bytes_est = None;
+                }
+            }
         }
     }
 
@@ -295,8 +303,65 @@ pub fn start_checks(view: &Entity<AppView>, cx: &mut App) {
         if let Ok(preflight) = rx.await {
             let _ = cx.update(|app| {
                 view.update(app, |this, c| {
-                    this.preflight = preflight;
-                    c.notify();
+                    // Don't clobber a refined estimate that may have already
+                    // arrived (the ffmpeg check can resolve first and kick off
+                    // [`spawn_refine`]); only fill an empty slot.
+                    if this.preflight.is_none() {
+                        this.preflight = preflight;
+                        c.notify();
+                    }
+                });
+            });
+        }
+    })
+    .detach();
+}
+
+/// Refine the pre-flight estimate off the UI thread: probe pending files (cached)
+/// and use exact sizes for already-compressed ones. No-op unless both folders are
+/// set and ffmpeg/ffprobe are ready. The result is applied only if the inputs
+/// that produced it are still current, so rapid folder/quality changes can't land
+/// a stale estimate.
+pub fn spawn_refine(view: &Entity<AppView>, cx: &mut App) {
+    let (source, output, quality, ready) = {
+        let v = view.read(cx);
+        (
+            v.input_dir.clone(),
+            v.output_dir.clone(),
+            v.quality,
+            v.ffmpeg == Some(ToolStatus::Ready),
+        )
+    };
+    let (Some(source), Some(output)) = (source, output) else {
+        return;
+    };
+    if !ready {
+        return;
+    }
+
+    let enc = EncodeConfig {
+        cq: quality.cq(),
+        maxrate: quality.maxrate().to_string(),
+        ..EncodeConfig::default()
+    };
+    let (tx, rx) = futures::channel::oneshot::channel::<Option<Preflight>>();
+    let (src, out) = (source.clone(), output.clone());
+    std::thread::spawn(move || {
+        let _ = tx.send(refine_preflight(&src, &out, &enc));
+    });
+
+    let view = view.clone();
+    cx.spawn(async move |cx| {
+        if let Ok(Some(refined)) = rx.await {
+            let _ = cx.update(|app| {
+                view.update(app, |this, c| {
+                    let still_current = this.input_dir.as_deref() == Some(source.as_path())
+                        && this.output_dir.as_deref() == Some(output.as_path())
+                        && this.quality == quality;
+                    if still_current {
+                        this.preflight = Some(refined);
+                        c.notify();
+                    }
                 });
             });
         }
@@ -325,6 +390,9 @@ pub fn spawn_ffmpeg_check(view: &Entity<AppView>, cx: &mut App) {
                 this.ffmpeg = Some(status);
                 c.notify();
             });
+            // ffprobe is now known-available (or not) — refine the estimate.
+            // `spawn_refine` no-ops unless ready, so a Missing result is harmless.
+            spawn_refine(&view, app);
         });
     })
     .detach();
@@ -348,7 +416,7 @@ pub fn start_run(view: &Entity<AppView>, cx: &mut App) {
         c.notify();
     });
 
-    let manifest = output.join(".replayless").join("manifest.json");
+    let manifest = replayless_core::paths::manifest_path(&output);
     if let Some(dir) = manifest.parent() {
         let _ = std::fs::create_dir_all(dir);
     }

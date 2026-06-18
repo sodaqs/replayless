@@ -9,8 +9,12 @@
 pub mod compress;
 pub mod config;
 pub mod encode;
+pub mod estimate;
 pub mod manifest;
+pub mod paths;
+pub mod preflight;
 pub mod probe;
+pub mod probe_cache;
 pub mod proc;
 pub mod progress;
 pub mod scan;

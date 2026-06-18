@@ -52,27 +52,51 @@ pub fn folder_row(
         )
 }
 
-/// Pre-flight summary strip: 4 stat chips in a row.
+/// Pre-flight summary strip: 4 stat chips in a row. `fallback_ratio` is the
+/// seeded preset estimate, used only until [`Preflight::bytes_est`] is filled in
+/// by ffprobe refinement.
 pub fn preflight_strip(
     pf: &Preflight,
-    ratio: f64,
+    fallback_ratio: f64,
     muted: Hsla,
     fg: Hsla,
     border: Hsla,
 ) -> impl IntoElement {
-    let est = (pf.bytes_now as f64 / ratio) as u64;
+    // Refined estimate (data-backed) when available; otherwise the seeded flat
+    // ratio, marked approximate with a leading "~".
+    let (est, ratio_label) = match pf.bytes_est {
+        Some(est) => {
+            let ratio = if est > 0 {
+                pf.bytes_now as f64 / est as f64
+            } else {
+                0.0
+            };
+            (est, format!("{ratio:.1}×"))
+        }
+        None => (
+            (pf.bytes_now as f64 / fallback_ratio) as u64,
+            format!("~{fallback_ratio:.1}×"),
+        ),
+    };
+    // Once some files are already compressed, the estimate uses their *real*
+    // sizes — surface that so the total reads as part-measured, not all-guessed.
+    let files_label = if pf.done_files > 0 {
+        format!("{} · {} done", pf.files, pf.done_files)
+    } else {
+        pf.files.to_string()
+    };
     let vdiv = |b: Hsla| div().w(px(1.)).h(px(28.)).bg(b).flex_shrink_0();
 
     h_flex()
         .gap_5()
         .items_center()
-        .child(stat_chip("Files", pf.files.to_string(), muted, fg))
+        .child(stat_chip("Files", files_label, muted, fg))
         .child(vdiv(border))
         .child(stat_chip("Source", human_size(pf.bytes_now), muted, fg))
         .child(vdiv(border))
         .child(stat_chip("Est. output", human_size(est), muted, fg))
         .child(vdiv(border))
-        .child(stat_chip("Ratio", format!("~{:.1}×", ratio), muted, fg))
+        .child(stat_chip("Ratio", ratio_label, muted, fg))
 }
 
 /// Open the native OS folder picker and write the chosen path into the view.
@@ -93,6 +117,7 @@ pub fn pick_folder(view: &Entity<AppView>, target: Target, cx: &mut App) {
                     this.set_dir(target, path);
                     c.notify();
                 });
+                crate::app::spawn_refine(&view, app);
             });
         }
     })
